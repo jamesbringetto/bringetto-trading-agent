@@ -16,7 +16,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
-from typing import Any
+from typing import Any, Callable
 
 from alpaca.common.exceptions import APIError
 from alpaca.trading.client import TradingClient
@@ -29,7 +29,11 @@ from alpaca.trading.requests import (
     MarketOrderRequest,
     StopLimitOrderRequest,
     StopOrderRequest,
+    TrailingStopOrderRequest,
+    TakeProfitRequest,
+    StopLossRequest,
 )
+from alpaca.trading.stream import TradingStream
 from alpaca.data.historical import StockHistoricalDataClient
 from alpaca.data.live import StockDataStream
 from alpaca.data.enums import DataFeed
@@ -478,6 +482,157 @@ class AlpacaBroker:
         except Exception as e:
             return self._handle_api_error(e, symbol, f"stop-limit {side.value}")
 
+    def submit_trailing_stop_order(
+        self,
+        symbol: str,
+        side: OrderSide,
+        qty: Decimal,
+        trail_price: Decimal | None = None,
+        trail_percent: Decimal | None = None,
+    ) -> OrderResult:
+        """
+        Submit a trailing stop order.
+
+        Per Alpaca SDK: Must specify exactly one of trail_price or trail_percent.
+
+        Args:
+            symbol: Stock symbol
+            side: Buy or sell
+            qty: Number of shares
+            trail_price: Dollar amount to trail (e.g., $1.00 trail)
+            trail_percent: Percentage to trail (e.g., 1.0 for 1%)
+
+        Raises:
+            ValueError: If neither or both trail_price and trail_percent are specified
+        """
+        # Validate - must have exactly one of trail_price or trail_percent
+        if (trail_price is None) == (trail_percent is None):
+            raise ValueError("Must specify exactly one of trail_price or trail_percent")
+
+        try:
+            order_data = TrailingStopOrderRequest(
+                symbol=symbol,
+                side=self._convert_order_side(side),
+                qty=float(qty),
+                trail_price=float(trail_price) if trail_price else None,
+                trail_percent=float(trail_percent) if trail_percent else None,
+                time_in_force=TimeInForce.DAY,
+            )
+
+            order = self._retry_with_backoff(
+                self._trading_client.submit_order,
+                order_data
+            )
+
+            trail_info = f"${trail_price}" if trail_price else f"{trail_percent}%"
+            logger.info(
+                f"Trailing stop order submitted: {side.value} {qty} {symbol} "
+                f"trail {trail_info} - Order ID: {order.id}"
+            )
+
+            return OrderResult(
+                success=True,
+                order_id=str(order.id),
+                filled_price=None,
+                filled_qty=None,
+                status=self._convert_order_status(order.status),
+                message="Trailing stop order submitted successfully",
+                raw_response=order.__dict__,
+            )
+
+        except Exception as e:
+            return self._handle_api_error(e, symbol, f"trailing-stop {side.value}")
+
+    def submit_bracket_order(
+        self,
+        symbol: str,
+        side: OrderSide,
+        qty: Decimal,
+        take_profit_price: Decimal,
+        stop_loss_price: Decimal,
+        stop_loss_limit_price: Decimal | None = None,
+        entry_type: str = "market",
+        limit_price: Decimal | None = None,
+    ) -> OrderResult:
+        """
+        Submit a bracket order with take profit and stop loss attached.
+
+        This creates an OCO (One-Cancels-Other) bracket where:
+        - Entry order fills first
+        - Take profit (limit) and stop loss orders are placed
+        - When one child order fills, the other is cancelled
+
+        Args:
+            symbol: Stock symbol
+            side: Buy or sell for entry
+            qty: Number of shares
+            take_profit_price: Limit price for take profit
+            stop_loss_price: Stop price for stop loss
+            stop_loss_limit_price: Limit price for stop loss (optional, creates stop-limit)
+            entry_type: "market" or "limit" for entry order
+            limit_price: Required if entry_type is "limit"
+        """
+        try:
+            # Build take profit leg
+            take_profit = TakeProfitRequest(limit_price=float(take_profit_price))
+
+            # Build stop loss leg (can be stop or stop-limit)
+            if stop_loss_limit_price:
+                stop_loss = StopLossRequest(
+                    stop_price=float(stop_loss_price),
+                    limit_price=float(stop_loss_limit_price),
+                )
+            else:
+                stop_loss = StopLossRequest(stop_price=float(stop_loss_price))
+
+            # Build the appropriate entry order
+            if entry_type == "limit":
+                if limit_price is None:
+                    raise ValueError("limit_price required for limit entry orders")
+                order_data = LimitOrderRequest(
+                    symbol=symbol,
+                    side=self._convert_order_side(side),
+                    qty=float(qty),
+                    limit_price=float(limit_price),
+                    time_in_force=TimeInForce.DAY,
+                    order_class="bracket",
+                    take_profit=take_profit,
+                    stop_loss=stop_loss,
+                )
+            else:
+                order_data = MarketOrderRequest(
+                    symbol=symbol,
+                    side=self._convert_order_side(side),
+                    qty=float(qty),
+                    time_in_force=TimeInForce.DAY,
+                    order_class="bracket",
+                    take_profit=take_profit,
+                    stop_loss=stop_loss,
+                )
+
+            order = self._retry_with_backoff(
+                self._trading_client.submit_order,
+                order_data
+            )
+
+            logger.info(
+                f"Bracket order submitted: {side.value} {qty} {symbol} "
+                f"TP=${take_profit_price} SL=${stop_loss_price} - Order ID: {order.id}"
+            )
+
+            return OrderResult(
+                success=True,
+                order_id=str(order.id),
+                filled_price=Decimal(str(order.filled_avg_price)) if order.filled_avg_price else None,
+                filled_qty=Decimal(str(order.filled_qty)) if order.filled_qty else None,
+                status=self._convert_order_status(order.status),
+                message="Bracket order submitted successfully",
+                raw_response=order.__dict__,
+            )
+
+        except Exception as e:
+            return self._handle_api_error(e, symbol, f"bracket {side.value}")
+
     def cancel_order(self, order_id: str) -> bool:
         """Cancel an open order."""
         try:
@@ -723,3 +878,166 @@ class AlpacaBroker:
             )
             logger.info(f"Data stream initialized with {feed.value} feed")
         return self._data_stream
+
+
+class OrderUpdateHandler:
+    """
+    Real-time order update handler using Alpaca's TradingStream.
+
+    Provides callbacks for order fills, cancellations, and other events
+    to enable real-time position and P&L tracking.
+    """
+
+    def __init__(self):
+        settings = get_settings()
+        self._api_key = settings.alpaca_api_key
+        self._secret_key = settings.alpaca_secret_key
+        self._is_paper = settings.is_paper_trading
+
+        self._trading_stream: TradingStream | None = None
+        self._is_running = False
+
+        # Callbacks for different event types
+        self._on_fill_callbacks: list[Callable[[dict], None]] = []
+        self._on_partial_fill_callbacks: list[Callable[[dict], None]] = []
+        self._on_cancel_callbacks: list[Callable[[dict], None]] = []
+        self._on_reject_callbacks: list[Callable[[dict], None]] = []
+
+        logger.info("OrderUpdateHandler initialized")
+
+    def on_fill(self, callback: Callable[[dict], None]) -> None:
+        """Register callback for order fills."""
+        self._on_fill_callbacks.append(callback)
+
+    def on_partial_fill(self, callback: Callable[[dict], None]) -> None:
+        """Register callback for partial fills."""
+        self._on_partial_fill_callbacks.append(callback)
+
+    def on_cancel(self, callback: Callable[[dict], None]) -> None:
+        """Register callback for order cancellations."""
+        self._on_cancel_callbacks.append(callback)
+
+    def on_reject(self, callback: Callable[[dict], None]) -> None:
+        """Register callback for order rejections."""
+        self._on_reject_callbacks.append(callback)
+
+    async def _handle_trade_update(self, data) -> None:
+        """
+        Handle incoming trade updates from the TradingStream.
+
+        Trade update events include:
+        - new: Order received
+        - fill: Order completely filled
+        - partial_fill: Order partially filled
+        - canceled: Order canceled
+        - expired: Order expired
+        - rejected: Order rejected
+        - replaced: Order replaced
+        """
+        try:
+            event = data.event
+            order = data.order
+
+            update_info = {
+                "event": event,
+                "order_id": str(order.id),
+                "symbol": order.symbol,
+                "side": order.side.value,
+                "qty": float(order.qty) if order.qty else None,
+                "filled_qty": float(order.filled_qty) if order.filled_qty else None,
+                "filled_avg_price": float(order.filled_avg_price) if order.filled_avg_price else None,
+                "status": order.status.value,
+                "timestamp": data.timestamp.isoformat() if hasattr(data, 'timestamp') else None,
+            }
+
+            logger.info(f"Trade update: {event} - {order.symbol} - Order {order.id}")
+
+            # Route to appropriate callbacks
+            if event == "fill":
+                for callback in self._on_fill_callbacks:
+                    try:
+                        callback(update_info)
+                    except Exception as e:
+                        logger.error(f"Error in fill callback: {e}")
+
+            elif event == "partial_fill":
+                for callback in self._on_partial_fill_callbacks:
+                    try:
+                        callback(update_info)
+                    except Exception as e:
+                        logger.error(f"Error in partial fill callback: {e}")
+
+            elif event in ("canceled", "expired"):
+                for callback in self._on_cancel_callbacks:
+                    try:
+                        callback(update_info)
+                    except Exception as e:
+                        logger.error(f"Error in cancel callback: {e}")
+
+            elif event == "rejected":
+                logger.error(f"Order rejected: {order.symbol} - {order.id}")
+                for callback in self._on_reject_callbacks:
+                    try:
+                        callback(update_info)
+                    except Exception as e:
+                        logger.error(f"Error in reject callback: {e}")
+
+        except Exception as e:
+            logger.error(f"Error handling trade update: {e}")
+
+    def _init_stream(self) -> None:
+        """Initialize the trading stream."""
+        if self._trading_stream is None:
+            self._trading_stream = TradingStream(
+                api_key=self._api_key,
+                secret_key=self._secret_key,
+                paper=self._is_paper,
+            )
+            self._trading_stream.subscribe_trade_updates(self._handle_trade_update)
+
+    async def start(self) -> None:
+        """Start the trading stream for real-time order updates."""
+        if self._is_running:
+            logger.warning("OrderUpdateHandler already running")
+            return
+
+        self._init_stream()
+        if self._trading_stream is None:
+            return
+
+        self._is_running = True
+        logger.info("Starting trading stream for order updates...")
+
+        try:
+            await self._trading_stream._run_forever()
+        except Exception as e:
+            self._is_running = False
+            logger.error(f"Trading stream error: {e}")
+            raise
+
+    def run_sync(self) -> None:
+        """Run the trading stream synchronously (blocking)."""
+        self._init_stream()
+        if self._trading_stream is None:
+            return
+
+        self._is_running = True
+        logger.info("Starting trading stream (sync)...")
+
+        try:
+            self._trading_stream.run()
+        except Exception as e:
+            self._is_running = False
+            logger.error(f"Trading stream error: {e}")
+            raise
+
+    async def stop(self) -> None:
+        """Stop the trading stream."""
+        if self._trading_stream and self._is_running:
+            await self._trading_stream.stop()
+            self._is_running = False
+            logger.info("Trading stream stopped")
+
+    def is_running(self) -> bool:
+        """Check if the stream is running."""
+        return self._is_running
