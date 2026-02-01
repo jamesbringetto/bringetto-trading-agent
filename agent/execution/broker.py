@@ -858,19 +858,24 @@ class AlpacaBroker:
             logger.error(f"Failed to get market hours: {e}")
             return None
 
-    def init_data_stream(self, feed: DataFeed = DataFeed.IEX) -> StockDataStream:
+    def init_data_stream(self, feed: DataFeed | None = None) -> StockDataStream:
         """
         Initialize and return the data stream for real-time data.
 
         Args:
-            feed: Data feed to use (IEX is free, SIP requires subscription)
+            feed: Data feed to use. If None, uses ALPACA_DATA_FEED from settings.
                 - DataFeed.IEX: Free, 15-min delayed for non-subscribers
-                - DataFeed.SIP: Real-time, requires Alpaca market data subscription
+                - DataFeed.SIP: Real-time, requires Alpaca market data subscription (~$9/mo)
 
         Returns:
             StockDataStream instance for subscribing to real-time data
         """
         if self._data_stream is None:
+            # Use settings default if no feed specified
+            if feed is None:
+                settings = get_settings()
+                feed = DataFeed.SIP if settings.use_sip_feed else DataFeed.IEX
+
             self._data_stream = StockDataStream(
                 api_key=self._api_key,
                 secret_key=self._secret_key,

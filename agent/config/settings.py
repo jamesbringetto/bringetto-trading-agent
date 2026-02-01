@@ -24,6 +24,10 @@ class Settings(BaseSettings):
         default="https://paper-api.alpaca.markets",
         description="Alpaca API base URL",
     )
+    alpaca_data_feed: Literal["sip", "iex"] = Field(
+        default="sip",
+        description="Market data feed: 'sip' (paid, real-time) or 'iex' (free, limited)",
+    )
 
     # Trading Configuration
     paper_trading_capital: float = Field(default=100000.0, ge=0)
@@ -88,6 +92,11 @@ class Settings(BaseSettings):
     def is_paper_trading(self) -> bool:
         """Check if running in paper trading mode."""
         return self.environment == "paper"
+
+    @property
+    def use_sip_feed(self) -> bool:
+        """Check if using SIP (paid real-time) data feed."""
+        return self.alpaca_data_feed.lower() == "sip"
 
     @property
     def max_daily_loss_amount(self) -> float:
