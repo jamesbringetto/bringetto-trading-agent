@@ -3,9 +3,10 @@
 import asyncio
 import signal
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pytz
+from dateutil import parser as date_parser
 from loguru import logger
 
 from agent.config.settings import get_settings
@@ -23,6 +24,10 @@ from agent.strategies import (
     EODReversal,
 )
 from agent.api.main import set_agent_state
+
+
+# How many seconds before market open to switch to 1-second checks
+PRE_MARKET_READY_SECONDS = 5
 
 
 class TradingAgent:
@@ -106,6 +111,82 @@ class TradingAgent:
         """Check if market is open using broker."""
         return self._broker.is_market_open()
 
+    def _get_seconds_until_market_open(self) -> float | None:
+        """
+        Calculate seconds until market opens.
+
+        Returns:
+            Seconds until market open, or None if unable to determine.
+            Returns 0 if market is already open.
+        """
+        try:
+            market_hours = self._broker.get_market_hours()
+            if not market_hours:
+                return None
+
+            if market_hours.get("is_open"):
+                return 0
+
+            next_open_str = market_hours.get("next_open")
+            if not next_open_str:
+                return None
+
+            # Parse the next_open timestamp
+            next_open = date_parser.isoparse(next_open_str)
+            now = datetime.now(next_open.tzinfo)
+
+            seconds_until_open = (next_open - now).total_seconds()
+            return max(0, seconds_until_open)
+
+        except Exception as e:
+            logger.error(f"Error calculating time until market open: {e}")
+            return None
+
+    async def _wait_for_market_open(self) -> None:
+        """
+        Efficiently wait for market to open.
+
+        Uses smart sleeping:
+        - If >5 seconds until open: sleep until 5 seconds before
+        - If <=5 seconds until open: check every 1 second
+        - Checks for shutdown during wait
+        """
+        while not self._shutdown_event.is_set():
+            seconds_until_open = self._get_seconds_until_market_open()
+
+            if seconds_until_open is None:
+                # Couldn't determine, fall back to checking every 30 seconds
+                logger.warning("Unable to determine market open time, checking in 30s")
+                await asyncio.sleep(30)
+                continue
+
+            if seconds_until_open == 0:
+                # Market is open
+                return
+
+            if seconds_until_open <= PRE_MARKET_READY_SECONDS:
+                # Within ready window, check every second
+                logger.debug(f"Market opens in {seconds_until_open:.1f}s - checking every second")
+                await asyncio.sleep(1)
+            else:
+                # Sleep until ready window, but cap at 5 minutes to allow for shutdown checks
+                sleep_time = min(
+                    seconds_until_open - PRE_MARKET_READY_SECONDS,
+                    300  # Max 5 minute sleep intervals
+                )
+                hours, remainder = divmod(int(seconds_until_open), 3600)
+                minutes, seconds = divmod(remainder, 60)
+
+                if hours > 0:
+                    time_str = f"{hours}h {minutes}m {seconds}s"
+                elif minutes > 0:
+                    time_str = f"{minutes}m {seconds}s"
+                else:
+                    time_str = f"{seconds}s"
+
+                logger.info(f"Market opens in {time_str} - sleeping for {sleep_time:.0f}s")
+                await asyncio.sleep(sleep_time)
+
     async def _check_strategies(self) -> None:
         """Check if any strategies should be auto-disabled."""
         for strategy in self._strategies:
@@ -153,34 +234,43 @@ class TradingAgent:
         try:
             while not self._shutdown_event.is_set():
                 try:
-                    # Check if market is open
+                    # Wait for market to open (smart waiting)
                     if not self._is_market_open():
-                        market_hours = self._broker.get_market_hours()
-                        if market_hours:
-                            logger.debug(f"Market closed. Next open: {market_hours.get('next_open')}")
-                        await asyncio.sleep(60)  # Check every minute when closed
-                        continue
+                        logger.info("Market is closed - waiting for open...")
+                        await self._wait_for_market_open()
 
-                    # Check circuit breaker
-                    can_trade, reason = self._circuit_breaker.can_trade()
-                    if not can_trade:
-                        logger.warning(f"Trading paused: {reason}")
-                        await asyncio.sleep(60)
-                        continue
+                        # Double-check after waiting (in case of shutdown or error)
+                        if self._shutdown_event.is_set():
+                            break
+                        if not self._is_market_open():
+                            continue
 
-                    # Check strategies for auto-disable
-                    await self._check_strategies()
+                    logger.info("Market is OPEN - starting trading loop")
 
-                    # Process strategies
-                    # In a real implementation, this would:
-                    # 1. Get market data
-                    # 2. Pass to strategies for signal generation
-                    # 3. Validate signals
-                    # 4. Execute trades
-                    # 5. Monitor positions
+                    # Inner loop while market is open
+                    while not self._shutdown_event.is_set() and self._is_market_open():
+                        # Check circuit breaker
+                        can_trade, reason = self._circuit_breaker.can_trade()
+                        if not can_trade:
+                            logger.warning(f"Trading paused: {reason}")
+                            await asyncio.sleep(60)
+                            continue
 
-                    # For now, just a placeholder loop
-                    await asyncio.sleep(1)
+                        # Check strategies for auto-disable
+                        await self._check_strategies()
+
+                        # Process strategies
+                        # In a real implementation, this would:
+                        # 1. Get market data
+                        # 2. Pass to strategies for signal generation
+                        # 3. Validate signals
+                        # 4. Execute trades
+                        # 5. Monitor positions
+
+                        # Trading loop runs every second when market is open
+                        await asyncio.sleep(1)
+
+                    logger.info("Market is CLOSED - exiting trading loop")
 
                 except Exception as e:
                     logger.error(f"Error in main loop: {e}")
