@@ -4,7 +4,7 @@ from typing import Any
 
 from fastapi import APIRouter, Query
 
-from agent.api.main import get_agent_state
+from agent.api.state import get_agent_state
 
 router = APIRouter()
 
