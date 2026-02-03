@@ -91,8 +91,9 @@ def create_app() -> FastAPI:
         db_healthy = True
         try:
             from agent.database import get_session
+            from sqlalchemy import text
             with get_session() as session:
-                session.execute("SELECT 1")
+                session.execute(text("SELECT 1"))
         except Exception as e:
             logger.error(f"Database health check failed: {e}")
             db_healthy = False
