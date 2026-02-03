@@ -10,6 +10,7 @@ from loguru import logger
 from pydantic import BaseModel
 
 from agent.api.routes import controls, performance, strategies, trades
+from agent.api.state import get_agent_state, set_agent_state
 from agent.config.settings import get_settings
 
 
@@ -25,23 +26,8 @@ class HealthResponse(BaseModel):
     open_positions: int
 
 
-# Global state (will be set by main.py)
-_agent_state: dict[str, Any] = {
-    "broker": None,
-    "circuit_breaker": None,
-    "strategies": [],
-    "is_running": False,
-}
-
-
-def get_agent_state() -> dict[str, Any]:
-    """Get the current agent state."""
-    return _agent_state
-
-
-def set_agent_state(key: str, value: Any) -> None:
-    """Set a value in the agent state."""
-    _agent_state[key] = value
+# Re-export for backwards compatibility
+__all__ = ["app", "create_app", "get_agent_state", "set_agent_state"]
 
 
 @asynccontextmanager

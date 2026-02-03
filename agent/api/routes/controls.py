@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException
 from loguru import logger
 from pydantic import BaseModel
 
-from agent.api.main import get_agent_state, set_agent_state
+from agent.api.state import get_agent_state, set_agent_state
 
 router = APIRouter()
 
