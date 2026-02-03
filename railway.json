@@ -6,7 +6,7 @@
     "watchPatterns": ["agent/**", "requirements.txt", "pyproject.toml"]
   },
   "deploy": {
-    "startCommand": "python -m agent.main & uvicorn agent.api.main:app --host 0.0.0.0 --port ${PORT:-8000}",
+    "startCommand": "python start.py",
     "healthcheckPath": "/health",
     "healthcheckTimeout": 300,
     "restartPolicyType": "ON_FAILURE",
