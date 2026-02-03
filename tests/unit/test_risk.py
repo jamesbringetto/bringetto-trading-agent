@@ -1,13 +1,22 @@
 """Unit tests for risk management modules."""
 
+from datetime import datetime
 from decimal import Decimal
+from unittest.mock import patch
 
 import pytest
+import pytz
 
 from agent.config.constants import OrderSide
 from agent.risk.circuit_breaker import CircuitBreaker
 from agent.risk.validator import TradeValidator
 from agent.strategies.base import StrategySignal
+
+
+# Helper to create a market-hours datetime (10:30 AM ET)
+def _market_hours_time():
+    et = pytz.timezone("America/New_York")
+    return datetime(2024, 1, 15, 10, 30, 0, tzinfo=et)
 
 
 class TestCircuitBreaker:
@@ -73,8 +82,14 @@ class TestTradeValidator:
 
     @pytest.fixture
     def validator(self):
-        """Create a validator instance."""
-        return TradeValidator()
+        """Create a validator instance with mocked market time."""
+        with patch.object(
+            TradeValidator, "_get_market_time", return_value=_market_hours_time()
+        ):
+            v = TradeValidator()
+            # Patch the instance method for use in tests
+            v._get_market_time = lambda: _market_hours_time()
+            yield v
 
     @pytest.fixture
     def valid_signal(self):
