@@ -1,0 +1,83 @@
+services:
+  # Trading agent
+  agent:
+    build: .
+    container_name: trading-agent
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/trading_agent
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - .:/app  # Mount source for live reloading during dev
+    command: python agent/main.py
+
+  # API server (for dashboard)
+  api:
+    build: .
+    container_name: trading-api
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/trading_agent
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - .:/app
+    command: uvicorn agent.api.main:app --host 0.0.0.0 --port 8000 --reload
+
+  # PostgreSQL database
+  db:
+    image: postgres:15
+    container_name: trading-db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: trading_agent
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Run tests
+  test:
+    build: .
+    container_name: trading-test
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/trading_agent
+      - ALPACA_API_KEY=test_key
+      - ALPACA_SECRET_KEY=test_secret
+      - ENVIRONMENT=paper
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - .:/app
+    command: pytest tests/ -v
+    profiles:
+      - test
+
+  # Lint check
+  lint:
+    build: .
+    container_name: trading-lint
+    volumes:
+      - .:/app
+    command: ruff check .
+    profiles:
+      - lint
+
+volumes:
+  postgres_data:
