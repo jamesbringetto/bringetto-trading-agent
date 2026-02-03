@@ -1,14 +1,59 @@
 """Performance metrics API endpoints."""
 
+from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query
+from pydantic import BaseModel
 
 from agent.api.auth import require_api_key
 from agent.api.state import get_agent_state
+from agent.database import get_session
+from agent.database.repositories import (
+    DailySummaryRepository,
+    StrategyPerformanceRepository,
+    StrategyRepository,
+)
 
 # All endpoints in this router require API key authentication
 router = APIRouter(dependencies=[Depends(require_api_key)])
+
+
+class DailySummaryResponse(BaseModel):
+    """Daily summary response model."""
+
+    date: str
+    total_trades: int
+    winning_trades: int
+    losing_trades: int
+    win_rate: float | None
+    total_pnl: float
+    total_pnl_pct: float | None
+    best_trade: float | None
+    worst_trade: float | None
+    sharpe_ratio: float | None
+    profit_factor: float | None
+    account_balance: float | None
+
+
+class StrategyPerformanceResponse(BaseModel):
+    """Strategy performance response model."""
+
+    name: str
+    type: str
+    is_active: bool
+    open_positions: int
+    trades_today: int
+    win_rate: float | None
+    pnl_today: float
+    profit_factor: float | None
+
+
+class EquityCurvePoint(BaseModel):
+    """Equity curve data point."""
+
+    date: str
+    equity: float
 
 
 @router.get("/summary")
@@ -26,6 +71,15 @@ async def get_performance_summary() -> dict[str, Any]:
     if broker:
         account_info = broker.get_account()
 
+    # Get open positions count
+    open_positions = 0
+    if broker:
+        try:
+            positions = broker.get_positions()
+            open_positions = len(positions)
+        except Exception:
+            pass
+
     return {
         "account": {
             "equity": float(account_info.equity) if account_info else 0,
@@ -36,6 +90,7 @@ async def get_performance_summary() -> dict[str, Any]:
             "pnl": daily_stats.get("daily_pnl", 0),
             "trades": daily_stats.get("trades_today", 0),
             "max_trades": daily_stats.get("max_trades", 30),
+            "open_positions": open_positions,
         },
         "circuit_breaker": {
             "is_triggered": daily_stats.get("is_triggered", False),
@@ -46,49 +101,171 @@ async def get_performance_summary() -> dict[str, Any]:
 
 @router.get("/daily")
 async def get_daily_performance(
-    days: int = Query(default=30, ge=1, le=365)
-) -> list[dict[str, Any]]:
+    days: int = Query(default=30, ge=1, le=365),
+) -> list[DailySummaryResponse]:
     """Get daily performance for the last N days."""
-    # This would query from daily_summaries table
-    return []
+    try:
+        with get_session() as session:
+            repo = DailySummaryRepository(session)
+            summaries = repo.get_history(days=days)
+
+            return [
+                DailySummaryResponse(
+                    date=s.date.isoformat() if s.date else "",
+                    total_trades=s.total_trades,
+                    winning_trades=s.winning_trades,
+                    losing_trades=s.losing_trades,
+                    win_rate=float(s.win_rate) if s.win_rate else None,
+                    total_pnl=float(s.total_pnl),
+                    total_pnl_pct=float(s.total_pnl_pct) if s.total_pnl_pct else None,
+                    best_trade=float(s.best_trade) if s.best_trade else None,
+                    worst_trade=float(s.worst_trade) if s.worst_trade else None,
+                    sharpe_ratio=float(s.sharpe_ratio) if s.sharpe_ratio else None,
+                    profit_factor=float(s.profit_factor) if s.profit_factor else None,
+                    account_balance=float(s.account_balance) if s.account_balance else None,
+                )
+                for s in summaries
+            ]
+    except Exception:
+        return []
 
 
 @router.get("/strategies")
-async def get_strategy_performance() -> list[dict[str, Any]]:
+async def get_strategy_performance() -> list[StrategyPerformanceResponse]:
     """Get performance metrics per strategy."""
     state = get_agent_state()
     strategies = state.get("strategies", [])
 
-    # This would typically come from the database
-    # For now, return basic info
+    # Try to get performance data from database
+    strategy_performance = {}
+    try:
+        with get_session() as session:
+            perf_repo = StrategyPerformanceRepository(session)
+            today = datetime.utcnow()
+
+            # Get today's performance for each strategy in the database
+            strat_repo = StrategyRepository(session)
+            db_strategies = strat_repo.get_all()
+
+            for s in db_strategies:
+                perf = perf_repo.get_for_date(s.id, today)
+                if perf:
+                    strategy_performance[s.name] = {
+                        "trades_today": perf.trades_count,
+                        "win_rate": float(perf.win_rate) if perf.win_rate else None,
+                        "pnl_today": float(perf.total_pnl),
+                        "profit_factor": float(perf.profit_factor) if perf.profit_factor else None,
+                    }
+    except Exception:
+        pass
+
     return [
-        {
-            "name": s.name,
-            "type": s.strategy_type.value,
-            "is_active": s.is_active,
-            "open_positions": s.get_open_positions_count(),
-            # These would come from strategy_performance table
-            "trades_today": 0,
-            "win_rate": None,
-            "pnl_today": 0,
-            "profit_factor": None,
-        }
+        StrategyPerformanceResponse(
+            name=s.name,
+            type=s.strategy_type.value,
+            is_active=s.is_active,
+            open_positions=s.get_open_positions_count(),
+            trades_today=strategy_performance.get(s.name, {}).get("trades_today", 0),
+            win_rate=strategy_performance.get(s.name, {}).get("win_rate"),
+            pnl_today=strategy_performance.get(s.name, {}).get("pnl_today", 0),
+            profit_factor=strategy_performance.get(s.name, {}).get("profit_factor"),
+        )
         for s in strategies
     ]
 
 
 @router.get("/equity-curve")
 async def get_equity_curve(
-    period: str = Query(default="1M", pattern="^(1D|1W|1M|3M|6M|1Y|ALL)$")
-) -> list[dict[str, Any]]:
+    period: str = Query(default="1M", pattern="^(1D|1W|1M|3M|6M|1Y|ALL)$"),
+) -> list[EquityCurvePoint]:
     """Get equity curve data for charting."""
-    # This would query from daily_summaries or calculate from trades
-    return []
+    # Map period to days
+    period_days = {
+        "1D": 1,
+        "1W": 7,
+        "1M": 30,
+        "3M": 90,
+        "6M": 180,
+        "1Y": 365,
+        "ALL": 3650,  # ~10 years
+    }
+    days = period_days.get(period, 30)
+
+    try:
+        with get_session() as session:
+            repo = DailySummaryRepository(session)
+            summaries = repo.get_history(days=days)
+
+            return [
+                EquityCurvePoint(
+                    date=s.date.isoformat() if s.date else "",
+                    equity=float(s.account_balance) if s.account_balance else 0,
+                )
+                for s in reversed(summaries)  # Oldest first for charting
+                if s.account_balance is not None
+            ]
+    except Exception:
+        return []
 
 
 @router.get("/metrics")
 async def get_detailed_metrics() -> dict[str, Any]:
     """Get detailed trading metrics."""
+    try:
+        with get_session() as session:
+            daily_repo = DailySummaryRepository(session)
+
+            # Get recent summaries for aggregate metrics
+            summaries = daily_repo.get_history(days=365)
+
+            if summaries:
+                total_pnl = sum(float(s.total_pnl) for s in summaries)
+                winning_trades = sum(s.winning_trades for s in summaries)
+                losing_trades = sum(s.losing_trades for s in summaries)
+                total_count = winning_trades + losing_trades
+
+                # Calculate aggregate metrics
+                win_rate = (winning_trades / total_count * 100) if total_count > 0 else None
+
+                # Get best/worst trades across all summaries
+                best_trades = [float(s.best_trade) for s in summaries if s.best_trade]
+                worst_trades = [float(s.worst_trade) for s in summaries if s.worst_trade]
+                largest_win = max(best_trades) if best_trades else None
+                largest_loss = min(worst_trades) if worst_trades else None
+
+                # Average profit factor
+                profit_factors = [float(s.profit_factor) for s in summaries if s.profit_factor]
+                avg_profit_factor = (
+                    sum(profit_factors) / len(profit_factors) if profit_factors else None
+                )
+
+                # Average Sharpe ratio
+                sharpe_ratios = [float(s.sharpe_ratio) for s in summaries if s.sharpe_ratio]
+                avg_sharpe = sum(sharpe_ratios) / len(sharpe_ratios) if sharpe_ratios else None
+
+                # Max drawdown
+                max_drawdowns = [float(s.max_drawdown) for s in summaries if s.max_drawdown]
+                max_dd = min(max_drawdowns) if max_drawdowns else None
+
+                return {
+                    "total_trades": total_count,
+                    "winning_trades": winning_trades,
+                    "losing_trades": losing_trades,
+                    "win_rate": win_rate,
+                    "profit_factor": avg_profit_factor,
+                    "sharpe_ratio": avg_sharpe,
+                    "max_drawdown": max_dd,
+                    "total_pnl": total_pnl,
+                    "largest_win": largest_win,
+                    "largest_loss": largest_loss,
+                    "avg_win": None,  # Would need to calculate from trades
+                    "avg_loss": None,
+                    "avg_holding_time": None,
+                }
+    except Exception:
+        pass
+
+    # Return defaults if database unavailable
     return {
         "total_trades": 0,
         "winning_trades": 0,
@@ -97,6 +274,7 @@ async def get_detailed_metrics() -> dict[str, Any]:
         "profit_factor": None,
         "sharpe_ratio": None,
         "max_drawdown": None,
+        "total_pnl": 0,
         "avg_win": None,
         "avg_loss": None,
         "largest_win": None,
