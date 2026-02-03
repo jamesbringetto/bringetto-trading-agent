@@ -79,7 +79,7 @@ async def get_strategy_performance() -> list[dict[str, Any]]:
 
 @router.get("/equity-curve")
 async def get_equity_curve(
-    period: str = Query(default="1M", regex="^(1D|1W|1M|3M|6M|1Y|ALL)$")
+    period: str = Query(default="1M", pattern="^(1D|1W|1M|3M|6M|1Y|ALL)$")
 ) -> list[dict[str, Any]]:
     """Get equity curve data for charting."""
     # This would query from daily_summaries or calculate from trades
