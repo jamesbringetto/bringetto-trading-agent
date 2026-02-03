@@ -106,10 +106,17 @@ class OpeningRangeBreakout(BaseStrategy):
         return now.time() >= exit_time
 
     def update_opening_range(
-        self, symbol: str, high: Decimal, low: Decimal
+        self, symbol: str, high: Decimal, low: Decimal, force: bool = False
     ) -> None:
-        """Update the opening range for a symbol during the range period."""
-        if not self._is_range_period():
+        """Update the opening range for a symbol during the range period.
+
+        Args:
+            symbol: Stock symbol
+            high: High price to update range with
+            low: Low price to update range with
+            force: If True, bypass time check (for testing)
+        """
+        if not force and not self._is_range_period():
             return
 
         if symbol in self._opening_ranges:

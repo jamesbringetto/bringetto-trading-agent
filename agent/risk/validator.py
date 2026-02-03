@@ -47,14 +47,19 @@ class TradeValidator:
         now = self._get_market_time()
         current_time = now.time()
 
-        market_open = time(
-            self._settings.market_open_hour,
-            self._settings.market_open_minute + self._settings.avoid_first_minutes,
-        )
-        market_close = time(
-            self._settings.market_close_hour,
-            self._settings.market_close_minute - self._settings.avoid_last_minutes,
-        )
+        # Calculate open time with buffer (add minutes, handle overflow)
+        open_minutes = self._settings.market_open_minute + self._settings.avoid_first_minutes
+        open_hour = self._settings.market_open_hour + (open_minutes // 60)
+        open_minutes = open_minutes % 60
+        market_open = time(open_hour, open_minutes)
+
+        # Calculate close time with buffer (subtract minutes, handle underflow)
+        close_minutes = self._settings.market_close_minute - self._settings.avoid_last_minutes
+        close_hour = self._settings.market_close_hour
+        if close_minutes < 0:
+            close_hour -= 1
+            close_minutes += 60
+        market_close = time(close_hour, close_minutes)
 
         if current_time < market_open:
             return False, f"Before market open (opens at {market_open})"

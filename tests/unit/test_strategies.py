@@ -41,7 +41,7 @@ class TestOpeningRangeBreakout:
     def test_update_opening_range(self):
         """Test opening range is tracked correctly."""
         strategy = OpeningRangeBreakout()
-        strategy.update_opening_range("SPY", Decimal("450.00"), Decimal("448.00"))
+        strategy.update_opening_range("SPY", Decimal("450.00"), Decimal("448.00"), force=True)
 
         opening_range = strategy.get_opening_range("SPY")
         assert opening_range is not None
