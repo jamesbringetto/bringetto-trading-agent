@@ -9,7 +9,7 @@ import pytz
 from dateutil import parser as date_parser
 from loguru import logger
 
-from agent.api.main import set_agent_state
+from agent.api.state import set_agent_state
 from agent.config.settings import get_settings
 from agent.execution.broker import AlpacaBroker
 from agent.monitoring.logger import setup_logging
