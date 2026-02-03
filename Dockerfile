@@ -18,5 +18,5 @@ RUN pip install --no-cache-dir pytest pytest-asyncio pytest-cov pytest-mock ruff
 # Copy source code
 COPY . .
 
-# Default command
-CMD ["python", "agent/main.py"]
+# Default command - runs both trading agent and API server
+CMD ["python", "start.py"]
