@@ -113,6 +113,71 @@ export interface TradeDecision {
   what_failed: string | null;
 }
 
+// Analytics types
+export interface TimeOfDayPerformance {
+  hour: number;
+  total_trades: number;
+  winning_trades: number;
+  losing_trades: number;
+  win_rate: number | null;
+  total_pnl: number;
+  avg_pnl: number | null;
+}
+
+export interface SymbolPerformance {
+  symbol: string;
+  total_trades: number;
+  winning_trades: number;
+  losing_trades: number;
+  win_rate: number | null;
+  total_pnl: number;
+  avg_pnl: number | null;
+  largest_win: number | null;
+  largest_loss: number | null;
+}
+
+export interface StrategyComparison {
+  name: string;
+  strategy_type: string;
+  is_active: boolean;
+  total_trades: number;
+  winning_trades: number;
+  losing_trades: number;
+  win_rate: number | null;
+  total_pnl: number;
+  profit_factor: number | null;
+  sharpe_ratio: number | null;
+  max_drawdown: number | null;
+  avg_holding_time_seconds: number | null;
+}
+
+export interface RiskMetrics {
+  sharpe_ratio: number | null;
+  sortino_ratio: number | null;
+  max_drawdown: number | null;
+  max_drawdown_duration_days: number | null;
+  calmar_ratio: number | null;
+  win_rate: number | null;
+  profit_factor: number | null;
+  avg_win: number | null;
+  avg_loss: number | null;
+  expectancy: number | null;
+  risk_reward_ratio: number | null;
+}
+
+export interface PnLCurvePoint {
+  date: string;
+  cumulative_pnl: number;
+  daily_pnl: number;
+  trade_count: number;
+}
+
+export interface TradeDistribution {
+  pnl_ranges: { range: string; count: number }[];
+  holding_time_distribution: { range: string; count: number }[];
+  side_distribution: { buy: number; sell: number };
+}
+
 // ============================================================================
 // API Client
 // ============================================================================
@@ -289,6 +354,45 @@ class ApiClient {
 
   async getHealth(): Promise<HealthStatus> {
     return this.fetch<HealthStatus>('/health');
+  }
+
+  // --------------------------------------------------------------------------
+  // Analytics
+  // --------------------------------------------------------------------------
+
+  async getTimeOfDayPerformance(days: number = 30): Promise<TimeOfDayPerformance[]> {
+    return this.fetch<TimeOfDayPerformance[]>(
+      `/api/analytics/time-of-day?days=${days}`
+    );
+  }
+
+  async getSymbolPerformance(
+    days: number = 30,
+    limit: number = 20
+  ): Promise<SymbolPerformance[]> {
+    return this.fetch<SymbolPerformance[]>(
+      `/api/analytics/symbol-performance?days=${days}&limit=${limit}`
+    );
+  }
+
+  async getStrategyComparison(days: number = 30): Promise<StrategyComparison[]> {
+    return this.fetch<StrategyComparison[]>(
+      `/api/analytics/strategy-comparison?days=${days}`
+    );
+  }
+
+  async getRiskMetrics(days: number = 30): Promise<RiskMetrics> {
+    return this.fetch<RiskMetrics>(`/api/analytics/risk-metrics?days=${days}`);
+  }
+
+  async getPnLCurve(days: number = 30): Promise<PnLCurvePoint[]> {
+    return this.fetch<PnLCurvePoint[]>(`/api/analytics/pnl-curve?days=${days}`);
+  }
+
+  async getTradeDistribution(days: number = 30): Promise<TradeDistribution> {
+    return this.fetch<TradeDistribution>(
+      `/api/analytics/trade-distribution?days=${days}`
+    );
   }
 }
 

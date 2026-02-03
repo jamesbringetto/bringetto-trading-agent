@@ -2,14 +2,13 @@
 
 from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import Any
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 from pydantic import BaseModel
 
-from agent.api.routes import controls, performance, strategies, trades
+from agent.api.routes import analytics, controls, performance, strategies, trades
 from agent.api.state import get_agent_state, set_agent_state
 from agent.config.settings import get_settings
 
@@ -63,6 +62,7 @@ def create_app() -> FastAPI:
     app.include_router(strategies.router, prefix="/api/strategies", tags=["strategies"])
     app.include_router(performance.router, prefix="/api/performance", tags=["performance"])
     app.include_router(controls.router, prefix="/api/controls", tags=["controls"])
+    app.include_router(analytics.router, prefix="/api/analytics", tags=["analytics"])
 
     @app.get("/", tags=["root"])
     async def root():
@@ -90,8 +90,9 @@ def create_app() -> FastAPI:
         # Check database
         db_healthy = True
         try:
-            from agent.database import get_session
             from sqlalchemy import text
+
+            from agent.database import get_session
             with get_session() as session:
                 session.execute(text("SELECT 1"))
         except Exception as e:
