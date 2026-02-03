@@ -1,6 +1,5 @@
 """Trade-related API endpoints."""
 
-from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -9,7 +8,7 @@ from pydantic import BaseModel
 from agent.api.auth import require_api_key
 from agent.api.state import get_agent_state
 from agent.database import get_session
-from agent.database.repositories import TradeRepository, TradeDecisionRepository
+from agent.database.repositories import TradeDecisionRepository, TradeRepository
 
 # All endpoints in this router require API key authentication
 router = APIRouter(dependencies=[Depends(require_api_key)])
@@ -85,7 +84,9 @@ async def get_active_trades() -> list[ActiveTradeResponse]:
             side=p.side,
             quantity=float(p.qty),
             entry_price=float(p.avg_entry_price),
-            current_price=float(p.current_price) if hasattr(p, 'current_price') else float(p.avg_entry_price),
+            current_price=float(p.current_price)
+            if hasattr(p, "current_price")
+            else float(p.avg_entry_price),
             market_value=float(p.market_value),
             unrealized_pnl=float(p.unrealized_pl),
             unrealized_pnl_pct=float(p.unrealized_plpc) * 100,
@@ -119,14 +120,14 @@ async def get_trade_history(
                     symbol=t.symbol,
                     strategy_id=str(t.strategy_id),
                     strategy_name=t.strategy.name if t.strategy else "Unknown",
-                    side=t.side.value if hasattr(t.side, 'value') else str(t.side),
+                    side=t.side.value if hasattr(t.side, "value") else str(t.side),
                     entry_price=float(t.entry_price),
                     exit_price=float(t.exit_price) if t.exit_price else None,
                     quantity=float(t.quantity),
                     pnl=float(t.pnl) if t.pnl else None,
                     pnl_percent=float(t.pnl_percent) if t.pnl_percent else None,
                     commission=float(t.commission) if t.commission else 0,
-                    status=t.status.value if hasattr(t.status, 'value') else str(t.status),
+                    status=t.status.value if hasattr(t.status, "value") else str(t.status),
                     entry_time=t.entry_time.isoformat() if t.entry_time else "",
                     exit_time=t.exit_time.isoformat() if t.exit_time else None,
                     holding_time_seconds=t.holding_time_seconds,
@@ -135,7 +136,7 @@ async def get_trade_history(
                 )
                 for t in trades
             ]
-    except Exception as e:
+    except Exception:
         # If database isn't available, return empty list
         return []
 
@@ -162,14 +163,14 @@ async def get_trade(trade_id: str) -> TradeResponse:
                 symbol=trade.symbol,
                 strategy_id=str(trade.strategy_id),
                 strategy_name=trade.strategy.name if trade.strategy else "Unknown",
-                side=trade.side.value if hasattr(trade.side, 'value') else str(trade.side),
+                side=trade.side.value if hasattr(trade.side, "value") else str(trade.side),
                 entry_price=float(trade.entry_price),
                 exit_price=float(trade.exit_price) if trade.exit_price else None,
                 quantity=float(trade.quantity),
                 pnl=float(trade.pnl) if trade.pnl else None,
                 pnl_percent=float(trade.pnl_percent) if trade.pnl_percent else None,
                 commission=float(trade.commission) if trade.commission else 0,
-                status=trade.status.value if hasattr(trade.status, 'value') else str(trade.status),
+                status=trade.status.value if hasattr(trade.status, "value") else str(trade.status),
                 entry_time=trade.entry_time.isoformat() if trade.entry_time else "",
                 exit_time=trade.exit_time.isoformat() if trade.exit_time else None,
                 holding_time_seconds=trade.holding_time_seconds,
@@ -200,7 +201,9 @@ async def get_trade_decisions(trade_id: str) -> list[TradeDecisionResponse]:
                     id=str(d.id),
                     trade_id=str(d.trade_id) if d.trade_id else None,
                     timestamp=d.timestamp.isoformat() if d.timestamp else "",
-                    decision_type=d.decision_type.value if hasattr(d.decision_type, 'value') else str(d.decision_type),
+                    decision_type=d.decision_type.value
+                    if hasattr(d.decision_type, "value")
+                    else str(d.decision_type),
                     strategy_name=d.strategy_name,
                     symbol=d.symbol,
                     price=float(d.price),

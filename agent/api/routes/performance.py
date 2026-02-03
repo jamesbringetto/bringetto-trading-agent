@@ -1,6 +1,6 @@
 """Performance metrics API endpoints."""
 
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query
@@ -13,7 +13,6 @@ from agent.database.repositories import (
     DailySummaryRepository,
     StrategyPerformanceRepository,
     StrategyRepository,
-    TradeRepository,
 )
 
 # All endpoints in this router require API key authentication
@@ -102,7 +101,7 @@ async def get_performance_summary() -> dict[str, Any]:
 
 @router.get("/daily")
 async def get_daily_performance(
-    days: int = Query(default=30, ge=1, le=365)
+    days: int = Query(default=30, ge=1, le=365),
 ) -> list[DailySummaryResponse]:
     """Get daily performance for the last N days."""
     try:
@@ -177,7 +176,7 @@ async def get_strategy_performance() -> list[StrategyPerformanceResponse]:
 
 @router.get("/equity-curve")
 async def get_equity_curve(
-    period: str = Query(default="1M", pattern="^(1D|1W|1M|3M|6M|1Y|ALL)$")
+    period: str = Query(default="1M", pattern="^(1D|1W|1M|3M|6M|1Y|ALL)$"),
 ) -> list[EquityCurvePoint]:
     """Get equity curve data for charting."""
     # Map period to days
@@ -214,11 +213,7 @@ async def get_detailed_metrics() -> dict[str, Any]:
     """Get detailed trading metrics."""
     try:
         with get_session() as session:
-            trade_repo = TradeRepository(session)
             daily_repo = DailySummaryRepository(session)
-
-            # Get all-time trade count
-            total_trades = trade_repo.get_trade_count()
 
             # Get recent summaries for aggregate metrics
             summaries = daily_repo.get_history(days=365)
@@ -240,7 +235,9 @@ async def get_detailed_metrics() -> dict[str, Any]:
 
                 # Average profit factor
                 profit_factors = [float(s.profit_factor) for s in summaries if s.profit_factor]
-                avg_profit_factor = sum(profit_factors) / len(profit_factors) if profit_factors else None
+                avg_profit_factor = (
+                    sum(profit_factors) / len(profit_factors) if profit_factors else None
+                )
 
                 # Average Sharpe ratio
                 sharpe_ratios = [float(s.sharpe_ratio) for s in summaries if s.sharpe_ratio]

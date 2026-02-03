@@ -10,7 +10,6 @@ from sqlalchemy.orm import Session
 
 from agent.config.constants import DecisionType, OrderSide, StrategyType, TradeStatus
 from agent.database.models import (
-    ABTest,
     Alert,
     DailySummary,
     MarketRegimeRecord,
@@ -45,9 +44,9 @@ class StrategyRepository:
     def get_active(self) -> list[Strategy]:
         """Get all active strategies."""
         return list(
-            self.session.execute(
-                select(Strategy).where(Strategy.is_active == True)
-            ).scalars().all()
+            self.session.execute(select(Strategy).where(Strategy.is_active.is_(True)))
+            .scalars()
+            .all()
         )
 
     def create(
@@ -98,9 +97,9 @@ class TradeRepository:
     def get_open_trades(self) -> list[Trade]:
         """Get all open trades."""
         return list(
-            self.session.execute(
-                select(Trade).where(Trade.status == TradeStatus.OPEN)
-            ).scalars().all()
+            self.session.execute(select(Trade).where(Trade.status == TradeStatus.OPEN))
+            .scalars()
+            .all()
         )
 
     def get_trades_by_strategy(
@@ -117,7 +116,9 @@ class TradeRepository:
                 .order_by(desc(Trade.timestamp))
                 .limit(limit)
                 .offset(offset)
-            ).scalars().all()
+            )
+            .scalars()
+            .all()
         )
 
     def get_history(
@@ -138,9 +139,7 @@ class TradeRepository:
         if strategy_name:
             query = query.join(Strategy).where(Strategy.name == strategy_name)
 
-        return list(
-            self.session.execute(query.limit(limit).offset(offset)).scalars().all()
-        )
+        return list(self.session.execute(query.limit(limit).offset(offset)).scalars().all())
 
     def get_trades_for_date(self, date: datetime) -> list[Trade]:
         """Get all trades for a specific date."""
@@ -148,10 +147,10 @@ class TradeRepository:
         end = start + timedelta(days=1)
         return list(
             self.session.execute(
-                select(Trade).where(
-                    and_(Trade.timestamp >= start, Trade.timestamp < end)
-                )
-            ).scalars().all()
+                select(Trade).where(and_(Trade.timestamp >= start, Trade.timestamp < end))
+            )
+            .scalars()
+            .all()
         )
 
     def get_trade_count(
@@ -231,7 +230,9 @@ class TradeDecisionRepository:
                 select(TradeDecision)
                 .where(TradeDecision.trade_id == trade_id)
                 .order_by(TradeDecision.timestamp)
-            ).scalars().all()
+            )
+            .scalars()
+            .all()
         )
 
     def get_by_strategy(
@@ -248,7 +249,9 @@ class TradeDecisionRepository:
                 .order_by(desc(TradeDecision.timestamp))
                 .limit(limit)
                 .offset(offset)
-            ).scalars().all()
+            )
+            .scalars()
+            .all()
         )
 
     def create(
@@ -314,9 +317,7 @@ class StrategyPerformanceRepository:
     def __init__(self, session: Session):
         self.session = session
 
-    def get_for_date(
-        self, strategy_id: UUID, date: datetime
-    ) -> StrategyPerformance | None:
+    def get_for_date(self, strategy_id: UUID, date: datetime) -> StrategyPerformance | None:
         """Get performance record for a strategy on a specific date."""
         date_only = date.replace(hour=0, minute=0, second=0, microsecond=0)
         return self.session.execute(
@@ -345,7 +346,9 @@ class StrategyPerformanceRepository:
                     )
                 )
                 .order_by(desc(StrategyPerformance.date))
-            ).scalars().all()
+            )
+            .scalars()
+            .all()
         )
 
     def get_all_for_date(self, date: datetime) -> list[StrategyPerformance]:
@@ -353,10 +356,10 @@ class StrategyPerformanceRepository:
         date_only = date.replace(hour=0, minute=0, second=0, microsecond=0)
         return list(
             self.session.execute(
-                select(StrategyPerformance).where(
-                    StrategyPerformance.date == date_only
-                )
-            ).scalars().all()
+                select(StrategyPerformance).where(StrategyPerformance.date == date_only)
+            )
+            .scalars()
+            .all()
         )
 
     def upsert(
@@ -406,7 +409,9 @@ class DailySummaryRepository:
                 select(DailySummary)
                 .where(DailySummary.date >= since)
                 .order_by(desc(DailySummary.date))
-            ).scalars().all()
+            )
+            .scalars()
+            .all()
         )
 
     def upsert(self, date: datetime, **metrics: Any) -> DailySummary:
@@ -437,10 +442,12 @@ class AlertRepository:
         return list(
             self.session.execute(
                 select(Alert)
-                .where(Alert.is_read == False)
+                .where(Alert.is_read.is_(False))
                 .order_by(desc(Alert.timestamp))
                 .limit(limit)
-            ).scalars().all()
+            )
+            .scalars()
+            .all()
         )
 
     def get_unresolved(self, limit: int = 50) -> list[Alert]:
@@ -448,10 +455,12 @@ class AlertRepository:
         return list(
             self.session.execute(
                 select(Alert)
-                .where(Alert.is_resolved == False)
+                .where(Alert.is_resolved.is_(False))
                 .order_by(desc(Alert.timestamp))
                 .limit(limit)
-            ).scalars().all()
+            )
+            .scalars()
+            .all()
         )
 
     def create(
@@ -522,7 +531,9 @@ class MarketRegimeRepository:
                     )
                 )
                 .order_by(desc(MarketRegimeRecord.timestamp))
-            ).scalars().all()
+            )
+            .scalars()
+            .all()
         )
 
     def create(
