@@ -2,12 +2,14 @@
 
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
+from agent.api.auth import require_api_key
 from agent.api.state import get_agent_state
 
-router = APIRouter()
+# All endpoints in this router require API key authentication
+router = APIRouter(dependencies=[Depends(require_api_key)])
 
 
 class StrategyResponse(BaseModel):
