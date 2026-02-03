@@ -5,7 +5,7 @@ Assets: Large-cap tech (AAPL, MSFT, GOOGL, NVDA, TSLA)
 """
 
 from dataclasses import dataclass
-from datetime import datetime, time, timedelta
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any
 from uuid import UUID

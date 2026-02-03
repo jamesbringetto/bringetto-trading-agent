@@ -1,14 +1,14 @@
 """Configuration management for the trading agent."""
 
-from agent.config.settings import Settings, get_settings
 from agent.config.constants import (
-    TradingConstants,
-    StrategyType,
+    MarketRegime,
     OrderSide,
     OrderStatus,
+    StrategyType,
     TradeStatus,
-    MarketRegime,
+    TradingConstants,
 )
+from agent.config.settings import Settings, get_settings
 
 __all__ = [
     "Settings",

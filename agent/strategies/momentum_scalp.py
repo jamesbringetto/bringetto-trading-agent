@@ -4,7 +4,6 @@ Concept: Ride strong intraday trends with quick scalps.
 Assets: High-volume stocks with >5M daily volume
 """
 
-from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 from typing import Any
@@ -197,7 +196,6 @@ class MomentumScalp(BaseStrategy):
         self, context: MarketContext, entry_price: Decimal, side: OrderSide
     ) -> tuple[bool, str]:
         """Check if exit conditions are met."""
-        symbol = context.symbol
         current_price = context.current_price
 
         # Check stop loss

@@ -1,12 +1,10 @@
 """Performance metrics API endpoints."""
 
-from datetime import datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Query
 
 from agent.api.main import get_agent_state
-
 
 router = APIRouter()
 

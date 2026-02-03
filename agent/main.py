@@ -3,28 +3,26 @@
 import asyncio
 import signal
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime
 
 import pytz
 from dateutil import parser as date_parser
 from loguru import logger
 
+from agent.api.main import set_agent_state
 from agent.config.settings import get_settings
-from agent.config.constants import TradingConstants
+from agent.execution.broker import AlpacaBroker
 from agent.monitoring.logger import setup_logging
 from agent.monitoring.metrics import MetricsCollector
-from agent.execution.broker import AlpacaBroker
 from agent.risk.circuit_breaker import CircuitBreaker
 from agent.risk.validator import TradeValidator
 from agent.strategies import (
+    EODReversal,
+    GapAndGo,
+    MomentumScalp,
     OpeningRangeBreakout,
     VWAPReversion,
-    MomentumScalp,
-    GapAndGo,
-    EODReversal,
 )
-from agent.api.main import set_agent_state
-
 
 # How many seconds before market open to switch to 1-second checks
 PRE_MARKET_READY_SECONDS = 5

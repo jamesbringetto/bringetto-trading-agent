@@ -3,11 +3,10 @@
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
 from loguru import logger
+from pydantic import BaseModel
 
 from agent.api.main import get_agent_state, set_agent_state
-
 
 router = APIRouter()
 

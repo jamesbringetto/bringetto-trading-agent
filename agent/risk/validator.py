@@ -3,13 +3,12 @@
 from dataclasses import dataclass
 from datetime import datetime, time
 from decimal import Decimal
-from typing import Any
 
 import pytz
 from loguru import logger
 
-from agent.config.settings import get_settings
 from agent.config.constants import OrderSide, TradingConstants
+from agent.config.settings import get_settings
 from agent.strategies.base import StrategySignal
 
 

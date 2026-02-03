@@ -7,7 +7,6 @@ from pydantic import BaseModel
 
 from agent.api.main import get_agent_state
 
-
 router = APIRouter()
 
 

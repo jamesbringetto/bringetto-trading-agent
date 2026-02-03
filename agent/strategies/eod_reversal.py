@@ -4,7 +4,6 @@ Concept: Catch reversals in the final hour of trading.
 Assets: SPY, QQQ (high liquidity for late-day trading)
 """
 
-from dataclasses import dataclass
 from datetime import datetime, time
 from decimal import Decimal
 from typing import Any

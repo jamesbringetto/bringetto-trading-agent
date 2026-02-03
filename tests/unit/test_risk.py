@@ -4,10 +4,10 @@ from decimal import Decimal
 
 import pytest
 
+from agent.config.constants import OrderSide
 from agent.risk.circuit_breaker import CircuitBreaker
 from agent.risk.validator import TradeValidator
 from agent.strategies.base import StrategySignal
-from agent.config.constants import OrderSide
 
 
 class TestCircuitBreaker:

@@ -1,14 +1,11 @@
 """Trade-related API endpoints."""
 
-from datetime import datetime
 from typing import Any
-from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from agent.api.main import get_agent_state
-
 
 router = APIRouter()
 

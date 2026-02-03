@@ -1,9 +1,9 @@
 """Circuit breaker for automatic trading halts based on loss limits."""
 
-from dataclasses import dataclass, field
+from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import Decimal
-from typing import Callable
 
 import pytz
 from loguru import logger

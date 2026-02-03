@@ -1,9 +1,9 @@
 """Pytest configuration and fixtures."""
 
 import os
-import pytest
 from decimal import Decimal
 
+import pytest
 
 # Set test environment
 os.environ["ENVIRONMENT"] = "paper"

@@ -4,13 +4,13 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 from pydantic import BaseModel
 
+from agent.api.routes import controls, performance, strategies, trades
 from agent.config.settings import get_settings
-from agent.api.routes import trades, strategies, performance, controls
 
 
 class HealthResponse(BaseModel):

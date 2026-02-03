@@ -11,39 +11,38 @@ Compliance Notes:
 - WebSocket reconnection is handled automatically
 """
 
-import asyncio
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
-from typing import Any, Callable
+from typing import Any
 
 from alpaca.common.exceptions import APIError
+from alpaca.data.enums import DataFeed
+from alpaca.data.historical import StockHistoricalDataClient
+from alpaca.data.live import StockDataStream
+from alpaca.data.requests import StockBarsRequest, StockLatestQuoteRequest
+from alpaca.data.timeframe import TimeFrame
 from alpaca.trading.client import TradingClient
 from alpaca.trading.enums import OrderSide as AlpacaOrderSide
 from alpaca.trading.enums import OrderStatus as AlpacaOrderStatus
-from alpaca.trading.enums import TimeInForce, QueryOrderStatus
+from alpaca.trading.enums import QueryOrderStatus, TimeInForce
 from alpaca.trading.requests import (
     GetOrdersRequest,
     LimitOrderRequest,
     MarketOrderRequest,
     StopLimitOrderRequest,
-    StopOrderRequest,
-    TrailingStopOrderRequest,
-    TakeProfitRequest,
     StopLossRequest,
+    StopOrderRequest,
+    TakeProfitRequest,
+    TrailingStopOrderRequest,
 )
 from alpaca.trading.stream import TradingStream
-from alpaca.data.historical import StockHistoricalDataClient
-from alpaca.data.live import StockDataStream
-from alpaca.data.enums import DataFeed
-from alpaca.data.requests import StockLatestQuoteRequest, StockBarsRequest
-from alpaca.data.timeframe import TimeFrame
 from loguru import logger
 
-from agent.config.settings import get_settings
 from agent.config.constants import OrderSide, OrderStatus
-
+from agent.config.settings import get_settings
 
 # Constants for rate limiting
 MAX_RETRIES = 3
@@ -161,7 +160,7 @@ class AlpacaBroker:
                     time.sleep(wait_time)
                 else:
                     raise
-            except Exception as e:
+            except Exception:
                 raise
         raise last_exception
 

@@ -1,7 +1,7 @@
 """Database connection management."""
 
+from collections.abc import AsyncGenerator, Generator
 from contextlib import asynccontextmanager, contextmanager
-from typing import AsyncGenerator, Generator
 
 from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine

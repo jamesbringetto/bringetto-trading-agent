@@ -7,7 +7,6 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
-import pandas as pd
 from loguru import logger
 
 from agent.config.constants import OrderSide, StrategyType

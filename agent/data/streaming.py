@@ -9,18 +9,18 @@ Compliance Notes:
 """
 
 import asyncio
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
-from typing import Any, Callable
+from typing import Any
 
-from alpaca.data.live import StockDataStream
 from alpaca.data.enums import DataFeed
+from alpaca.data.live import StockDataStream
 from alpaca.data.models import Bar, Quote, Trade
 from loguru import logger
 
 from agent.config.settings import get_settings
-
 
 # Reconnection configuration
 MAX_RECONNECT_ATTEMPTS = 10
@@ -399,7 +399,6 @@ class DataStreamer:
         Per Alpaca's terms, we must monitor for connectivity issues.
         This method provides health information for alerting.
         """
-        from datetime import timedelta
 
         now = datetime.now()
         last_data_age = None
