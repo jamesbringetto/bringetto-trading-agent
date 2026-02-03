@@ -4,19 +4,15 @@
 import os
 import subprocess
 import sys
+import time
 
 
 def main():
     port = os.environ.get("PORT", "8080")
 
-    # Start the trading agent in the background
-    agent_process = subprocess.Popen(
-        [sys.executable, "-m", "agent.main"],
-        stdout=sys.stdout,
-        stderr=sys.stderr,
-    )
+    print(f"Starting API server on port {port}...", flush=True)
 
-    # Start the API server (this blocks)
+    # Start the API server FIRST so healthcheck can pass quickly
     api_process = subprocess.Popen(
         [
             sys.executable, "-m", "uvicorn",
@@ -28,15 +24,41 @@ def main():
         stderr=sys.stderr,
     )
 
+    # Give uvicorn a moment to start before launching the agent
+    time.sleep(2)
+
+    print("Starting trading agent...", flush=True)
+
+    # Start the trading agent in the background
+    agent_process = subprocess.Popen(
+        [sys.executable, "-m", "agent.main"],
+        stdout=sys.stdout,
+        stderr=sys.stderr,
+    )
+
     # Wait for either process to exit
     try:
-        agent_process.wait()
-        api_process.wait()
+        # Use poll() to check both processes
+        while True:
+            api_status = api_process.poll()
+            agent_status = agent_process.poll()
+
+            if api_status is not None:
+                print(f"API server exited with code {api_status}", flush=True)
+                break
+            if agent_status is not None:
+                print(f"Trading agent exited with code {agent_status}", flush=True)
+                break
+
+            time.sleep(1)
     except KeyboardInterrupt:
+        print("Received interrupt, shutting down...", flush=True)
+    finally:
         agent_process.terminate()
         api_process.terminate()
         agent_process.wait()
         api_process.wait()
+        print("Shutdown complete", flush=True)
 
 
 if __name__ == "__main__":
