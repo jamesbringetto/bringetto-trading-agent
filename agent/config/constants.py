@@ -217,47 +217,77 @@ class TradingConstants:
     TIER_1_ASSETS: tuple[str, ...] = ("SPY", "QQQ", "IWM")
     TIER_2_ASSETS: tuple[str, ...] = ("AAPL", "MSFT", "NVDA", "TSLA", "GOOGL", "AMZN", "META")
 
-    # S&P 500 Components (most liquid stocks for paper trading experimentation)
-    # Organized by sector for clarity
+    # Full S&P 500 Components + Major ETFs for paper trading experimentation
+    # Organized by sector (GICS classification)
     SP500_ASSETS: tuple[str, ...] = (
-        # Major ETFs
+        # Major Index ETFs
         "SPY", "QQQ", "IWM", "DIA",
-        # Technology
-        "AAPL", "MSFT", "NVDA", "GOOGL", "GOOG", "META", "AVGO", "ADBE", "CRM", "CSCO",
-        "AMD", "INTC", "ORCL", "ACN", "IBM", "QCOM", "TXN", "NOW", "INTU", "AMAT",
-        "MU", "ADI", "LRCX", "KLAC", "SNPS", "CDNS", "MRVL", "FTNT", "PANW",
-        # Consumer Discretionary
+        # Information Technology (76 stocks)
+        "AAPL", "MSFT", "NVDA", "AVGO", "ADBE", "CRM", "CSCO", "ACN", "IBM", "ORCL",
+        "QCOM", "TXN", "NOW", "INTU", "AMD", "AMAT", "ADI", "LRCX", "MU", "KLAC",
+        "SNPS", "CDNS", "MRVL", "FTNT", "PANW", "MSI", "APH", "TEL", "NXPI", "MPWR",
+        "KEYS", "ON", "ANSS", "HPQ", "HPE", "CTSH", "IT", "GLW", "ZBRA", "TYL",
+        "EPAM", "PTC", "AKAM", "JNPR", "FFIV", "SWKS", "QRVO", "TER", "ENPH", "SEDG",
+        "FSLR", "GEN", "NTAP", "WDC", "STX", "TRMB",
+        # Communication Services (25 stocks)
+        "GOOGL", "GOOG", "META", "NFLX", "DIS", "CMCSA", "VZ", "T", "TMUS", "CHTR",
+        "EA", "TTWO", "WBD", "OMC", "IPG", "PARA", "FOX", "FOXA", "NWS", "NWSA",
+        "LYV", "MTCH", "DISH",
+        # Consumer Discretionary (59 stocks)
         "AMZN", "TSLA", "HD", "MCD", "NKE", "LOW", "SBUX", "TJX", "BKNG", "CMG",
-        "ORLY", "AZO", "ROST", "DHI", "LEN", "GM", "F", "MAR", "HLT",
-        # Communication Services
-        "NFLX", "DIS", "CMCSA", "VZ", "T", "TMUS", "CHTR", "EA", "TTWO", "WBD",
-        # Financials
-        "JPM", "V", "MA", "BAC", "WFC", "GS", "MS", "AXP", "BLK", "SCHW",
-        "C", "USB", "PNC", "TFC", "COF", "BK", "AIG", "MET", "PRU", "ALL",
-        "CB", "MMC", "AON", "ICE", "CME", "SPGI", "MCO", "MSCI",
-        # Healthcare
+        "ORLY", "AZO", "ROST", "DHI", "LEN", "GM", "F", "MAR", "HLT", "YUM",
+        "EBAY", "ETSY", "DPZ", "DARDEN", "WYNN", "LVS", "MGM", "CZR", "RCL", "CCL",
+        "NCLH", "EXPE", "ABNB", "ULTA", "BBY", "DG", "DLTR", "KMX", "AAP", "GPC",
+        "PHM", "NVR", "TOL", "MTH", "GRMN", "POOL", "TSCO", "WSM", "RH", "DECK",
+        "LULU", "NIO", "RIVN", "LCID", "VFC", "HAS", "RL", "PVH", "TPR",
+        # Consumer Staples (38 stocks)
+        "PG", "KO", "PEP", "COST", "WMT", "PM", "MO", "MDLZ", "CL", "KMB",
+        "GIS", "K", "HSY", "SJM", "EL", "STZ", "KHC", "KDP", "MNST", "ADM",
+        "BG", "CAG", "CPB", "HRL", "MKC", "SYY", "TSN", "KR", "WBA", "TGT",
+        "CHD", "CLX", "CLORX", "LW", "TAP", "BF.B", "SAM",
+        # Health Care (64 stocks)
         "UNH", "JNJ", "LLY", "PFE", "ABBV", "MRK", "TMO", "ABT", "DHR", "BMY",
         "AMGN", "GILD", "VRTX", "REGN", "ISRG", "MDT", "SYK", "BDX", "ZTS", "CI",
-        "ELV", "HUM", "CVS", "MCK", "CAH",
-        # Consumer Staples
-        "PG", "KO", "PEP", "COST", "WMT", "PM", "MO", "MDLZ", "CL", "KMB",
-        "GIS", "K", "HSY", "SJM", "EL", "STZ", "KHC", "KDP", "MNST",
-        # Industrials
+        "ELV", "HUM", "CVS", "MCK", "CAH", "BSX", "EW", "DXCM", "IDXX", "IQV",
+        "MTD", "A", "WAT", "HOLX", "ALGN", "COO", "TECH", "BIO", "RVTY", "CRL",
+        "WST", "DGX", "LH", "PKI", "HSIC", "XRAY", "MOH", "CNC", "BIIB", "MRNA",
+        "VTRS", "OGN", "CTLT", "INCY", "ILMN", "SGEN", "ALNY", "BMRN", "EXAS",
+        "HCA", "UHS", "THC", "DVA",
+        # Financials (74 stocks)
+        "JPM", "V", "MA", "BAC", "WFC", "GS", "MS", "AXP", "BLK", "SCHW",
+        "C", "USB", "PNC", "TFC", "COF", "BK", "AIG", "MET", "PRU", "ALL",
+        "CB", "MMC", "AON", "ICE", "CME", "SPGI", "MCO", "MSCI", "AFL", "TRV",
+        "PGR", "HIG", "CINF", "L", "GL", "AIZ", "AJG", "BRO", "WTW", "RJF",
+        "NTRS", "STT", "FITB", "HBAN", "CFG", "KEY", "RF", "ZION", "FRC", "SBNY",
+        "MTB", "CMA", "ALLY", "SYF", "DFS", "NDAQ", "CBOE", "TROW", "IVZ", "BEN",
+        "AMG", "FDS", "MKTX", "VOYA", "LNC", "UNM", "PFG", "RE", "AMP", "EFX",
+        "FIS", "FISV", "GPN", "PYPL",
+        # Industrials (77 stocks)
         "CAT", "DE", "UNP", "UPS", "HON", "RTX", "BA", "GE", "LMT", "MMM",
         "EMR", "ETN", "ITW", "PH", "ROK", "CMI", "PCAR", "NSC", "CSX", "FDX",
-        "WM", "RSG", "FAST", "CTAS", "PAYX", "VRSK",
-        # Energy
+        "WM", "RSG", "FAST", "CTAS", "PAYX", "VRSK", "GD", "NOC", "LHX", "TDG",
+        "HWM", "TXT", "HII", "CW", "LDOS", "J", "BAH", "AXON", "CARR", "OTIS",
+        "DOV", "AME", "ROP", "IEX", "XYL", "GWW", "SWK", "SNA", "IR", "PNR",
+        "AOS", "LII", "TT", "GNRC", "ALLE", "MAS", "JCI", "TRANE", "PWR", "HUBB",
+        "FTV", "NDSN", "WAB", "GGG", "RBC", "URI", "DAL", "UAL", "LUV", "AAL",
+        "ALK", "JBHT", "EXPD", "CHRW", "ODFL", "XPO", "LSTR",
+        # Energy (23 stocks)
         "XOM", "CVX", "COP", "SLB", "EOG", "MPC", "PSX", "VLO", "OXY", "PXD",
-        "DVN", "HAL", "BKR", "FANG", "HES",
-        # Materials
+        "DVN", "HAL", "BKR", "FANG", "HES", "KMI", "WMB", "OKE", "TRGP", "LNG",
+        "APA", "CTRA", "MRO",
+        # Materials (28 stocks)
         "LIN", "APD", "SHW", "ECL", "FCX", "NEM", "NUE", "DD", "DOW", "PPG",
-        "VMC", "MLM", "ALB", "CF", "MOS",
-        # Utilities
+        "VMC", "MLM", "ALB", "CF", "MOS", "CTVA", "FMC", "IFF", "CE", "EMN",
+        "AVY", "SEE", "PKG", "IP", "WRK", "BALL", "AMCR", "BLL",
+        # Utilities (30 stocks)
         "NEE", "DUK", "SO", "D", "AEP", "EXC", "SRE", "XEL", "PEG", "ED",
-        "WEC", "ES", "AWK", "AEE",
-        # Real Estate
+        "WEC", "ES", "AWK", "AEE", "DTE", "ETR", "FE", "PPL", "CMS", "CNP",
+        "EVRG", "AES", "ATO", "NI", "LNT", "PNW", "NRG", "CEG", "VST", "PCG",
+        # Real Estate (31 stocks)
         "PLD", "AMT", "EQIX", "CCI", "PSA", "O", "WELL", "DLR", "SPG", "AVB",
-        "EQR", "VTR", "ARE", "MAA", "UDR",
+        "EQR", "VTR", "ARE", "MAA", "UDR", "ESS", "CPT", "PEAK", "HST", "KIM",
+        "REG", "FRT", "BXP", "VNO", "SLG", "HIW", "CBRE", "JLL", "CSGP", "IRM",
+        "EXR",
     )
 
     # Minimum requirements
