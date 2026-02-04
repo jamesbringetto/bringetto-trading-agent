@@ -8,7 +8,6 @@ from pydantic import BaseModel
 
 from agent.api.auth import require_api_key
 from agent.api.state import get_agent_state, set_agent_state
-from agent.config.constants import TradingSession
 
 # All endpoints in this router require API key authentication
 router = APIRouter(dependencies=[Depends(require_api_key)])

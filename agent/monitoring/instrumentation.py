@@ -7,6 +7,7 @@ Provides visibility into:
 """
 
 import asyncio
+import contextlib
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -215,10 +216,8 @@ class Instrumentation:
         """Stop the heartbeat logging."""
         if self._heartbeat_task:
             self._heartbeat_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await self._heartbeat_task
-            except asyncio.CancelledError:
-                pass
             logger.info("Heartbeat stopped")
 
     # -------------------------------------------------------------------------
