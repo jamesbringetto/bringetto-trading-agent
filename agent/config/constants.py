@@ -26,6 +26,109 @@ class AccountStatus(str, Enum):
     REJECTED = "REJECTED"
 
 
+class AccountActivityType(str, Enum):
+    """Alpaca account activity types for non-trade activities.
+
+    Per Alpaca Activities API documentation:
+    - FILL: Order fills (handled separately in trades table)
+    - TRANS: Cash transfers
+    - MISC: Miscellaneous
+    - ACATC: ACATS IN/OUT (Cash)
+    - ACATS: ACATS IN/OUT (Securities)
+    - CSD: Cash disbursement
+    - CSR: Cash receipt
+    - DIV: Dividends
+    - DIVCGL: Dividend (capital gain long term)
+    - DIVCGS: Dividend (capital gain short term)
+    - DIVFEE: Dividend fee
+    - DIVFT: Dividend (foreign tax withheld)
+    - DIVNRA: Dividend (NRA withheld)
+    - DIVROC: Dividend return of capital
+    - DIVTW: Dividend (tax withheld)
+    - DIVTXEX: Dividend (tax exempt)
+    - INT: Interest
+    - INTNRA: Interest (NRA withheld)
+    - INTTW: Interest (tax withheld)
+    - JNL: Journal entry
+    - JNLC: Journal entry (cash)
+    - JNLS: Journal entry (stock)
+    - MA: Merger/acquisition
+    - NC: Name change
+    - OPASN: Option assignment
+    - OPEXP: Option expiration
+    - OPXRC: Option exercise
+    - PTC: Pass thru charge
+    - PTR: Pass thru rebate
+    - REORG: Reorg CA
+    - SC: Symbol change
+    - SSO: Stock spinoff
+    - SSP: Stock split
+    - FEE: Regulatory fees
+    - CFEE: Clearing fees
+    """
+
+    FILL = "FILL"
+    TRANS = "TRANS"
+    MISC = "MISC"
+    ACATC = "ACATC"
+    ACATS = "ACATS"
+    CSD = "CSD"
+    CSR = "CSR"
+    DIV = "DIV"
+    DIVCGL = "DIVCGL"
+    DIVCGS = "DIVCGS"
+    DIVFEE = "DIVFEE"
+    DIVFT = "DIVFT"
+    DIVNRA = "DIVNRA"
+    DIVROC = "DIVROC"
+    DIVTW = "DIVTW"
+    DIVTXEX = "DIVTXEX"
+    INT = "INT"
+    INTNRA = "INTNRA"
+    INTTW = "INTTW"
+    JNL = "JNL"
+    JNLC = "JNLC"
+    JNLS = "JNLS"
+    MA = "MA"
+    NC = "NC"
+    OPASN = "OPASN"
+    OPEXP = "OPEXP"
+    OPXRC = "OPXRC"
+    PTC = "PTC"
+    PTR = "PTR"
+    REORG = "REORG"
+    SC = "SC"
+    SSO = "SSO"
+    SSP = "SSP"
+    FEE = "FEE"
+    CFEE = "CFEE"
+
+
+class OrderType(str, Enum):
+    """Order type per Alpaca API."""
+
+    MARKET = "market"
+    LIMIT = "limit"
+    STOP = "stop"
+    STOP_LIMIT = "stop_limit"
+    TRAILING_STOP = "trailing_stop"
+
+
+class OrderClass(str, Enum):
+    """Order class per Alpaca API.
+
+    - simple: Standard single-leg order
+    - bracket: Entry with take-profit and stop-loss attached
+    - oco: One-Cancels-Other (two orders, one cancels the other when filled)
+    - oto: One-Triggers-Other (primary order triggers secondary when filled)
+    """
+
+    SIMPLE = "simple"
+    BRACKET = "bracket"
+    OCO = "oco"
+    OTO = "oto"
+
+
 class StrategyType(str, Enum):
     """Trading strategy types."""
 
@@ -112,9 +215,7 @@ class TradingConstants:
 
     # Asset Tiers
     TIER_1_ASSETS: tuple[str, ...] = ("SPY", "QQQ", "IWM")
-    TIER_2_ASSETS: tuple[str, ...] = (
-        "AAPL", "MSFT", "NVDA", "TSLA", "GOOGL", "AMZN", "META"
-    )
+    TIER_2_ASSETS: tuple[str, ...] = ("AAPL", "MSFT", "NVDA", "TSLA", "GOOGL", "AMZN", "META")
 
     # Minimum requirements
     MIN_STOCK_PRICE: float = 5.0
@@ -153,7 +254,7 @@ class TradingConstants:
     # 24/5 Trading Session Times (ET)
     # Overnight: 8:00 PM to 4:00 AM ET
     OVERNIGHT_START_HOUR: int = 20  # 8:00 PM
-    OVERNIGHT_END_HOUR: int = 4     # 4:00 AM
+    OVERNIGHT_END_HOUR: int = 4  # 4:00 AM
     # Pre-market: 4:00 AM to 9:30 AM ET
     PRE_MARKET_END_HOUR: int = 9
     PRE_MARKET_END_MINUTE: int = 30
