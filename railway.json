@@ -6,6 +6,7 @@
     "watchPatterns": ["agent/**", "requirements.txt", "pyproject.toml"]
   },
   "deploy": {
+    "releaseCommand": "alembic upgrade head",
     "startCommand": "python start.py",
     "healthcheckPath": "/health",
     "healthcheckTimeout": 300,
