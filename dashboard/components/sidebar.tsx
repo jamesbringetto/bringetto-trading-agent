@@ -62,6 +62,19 @@ export function Sidebar() {
           Kill Switch
         </button>
       </div>
+
+      {/* Legal Links */}
+      <div className="border-t px-4 py-3">
+        <div className="flex justify-center gap-3 text-xs text-muted-foreground">
+          <Link href="/terms" className="hover:text-foreground hover:underline">
+            Terms
+          </Link>
+          <span>|</span>
+          <Link href="/privacy" className="hover:text-foreground hover:underline">
+            Privacy
+          </Link>
+        </div>
+      </div>
     </div>
   );
 }
