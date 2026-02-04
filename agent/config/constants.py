@@ -4,6 +4,28 @@ from dataclasses import dataclass
 from enum import Enum
 
 
+class AccountStatus(str, Enum):
+    """Alpaca account status.
+
+    Per Alpaca documentation:
+    - ONBOARDING: Account application in progress
+    - SUBMISSION_FAILED: Account application submission failed
+    - SUBMITTED: Account application submitted and pending approval
+    - ACCOUNT_UPDATED: Account information updated, resubmitted for approval
+    - APPROVAL_PENDING: Initial approval received, pending final approval
+    - ACTIVE: Account approved and active for trading
+    - REJECTED: Account application rejected
+    """
+
+    ONBOARDING = "ONBOARDING"
+    SUBMISSION_FAILED = "SUBMISSION_FAILED"
+    SUBMITTED = "SUBMITTED"
+    ACCOUNT_UPDATED = "ACCOUNT_UPDATED"
+    APPROVAL_PENDING = "APPROVAL_PENDING"
+    ACTIVE = "ACTIVE"
+    REJECTED = "REJECTED"
+
+
 class StrategyType(str, Enum):
     """Trading strategy types."""
 

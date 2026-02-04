@@ -48,7 +48,7 @@ from alpaca.trading.requests import (
 from alpaca.trading.stream import TradingStream
 from loguru import logger
 
-from agent.config.constants import OrderSide, OrderStatus, TradingSession
+from agent.config.constants import AccountStatus, OrderSide, OrderStatus, TradingSession
 from agent.config.settings import get_settings
 
 # Eastern timezone for trading session calculations
@@ -91,15 +91,118 @@ class Position:
 
 @dataclass
 class AccountInfo:
-    """Account information."""
+    """Alpaca brokerage account information.
 
-    equity: Decimal
-    cash: Decimal
-    buying_power: Decimal
-    portfolio_value: Decimal
-    day_trade_count: int
-    pattern_day_trader: bool
-    daytrading_buying_power: Decimal | None = None
+    Contains all fields from the Alpaca Account object per their API documentation.
+    This provides complete account status, balances, margin info, and trading permissions.
+    """
+
+    # Account identification
+    account_number: str
+    status: AccountStatus
+    crypto_status: str | None  # Status of crypto trading capability
+    currency: str  # USD
+
+    # Cash and equity
+    equity: Decimal  # Cash + long_market_value + short_market_value
+    cash: Decimal  # Cash balance (can be negative if margin used)
+    last_equity: Decimal  # Equity at last market close
+
+    # Buying power
+    buying_power: Decimal  # Max available for purchasing securities
+    regt_buying_power: Decimal  # Reg T buying power (overnight positions)
+    daytrading_buying_power: Decimal | None  # Only for day trading (4x margin for PDT)
+    non_marginable_buying_power: Decimal  # For non-marginable securities
+
+    # Portfolio values
+    portfolio_value: Decimal  # Deprecated but kept for compatibility
+    long_market_value: Decimal  # Total market value of long positions
+    short_market_value: Decimal  # Total market value of short positions (negative)
+
+    # Margin info
+    initial_margin: Decimal  # Initial margin requirement
+    maintenance_margin: Decimal  # Maintenance margin requirement
+    last_maintenance_margin: Decimal  # Maintenance margin at last market close
+    sma: Decimal  # Special Memorandum Account value
+    multiplier: str  # Leverage multiplier (1-4 based on account type)
+
+    # Day trading
+    day_trade_count: int  # Rolling 5-day count of day trades
+    pattern_day_trader: bool  # PDT flag
+
+    # Trading restrictions
+    trading_blocked: bool  # If true, account cannot place orders
+    transfers_blocked: bool  # If true, account cannot make transfers
+    account_blocked: bool  # If true, account is blocked from all activity
+    trade_suspended_by_user: bool  # If true, user has suspended trading
+
+    # Account features
+    shorting_enabled: bool  # If account can short sell
+    options_approved_level: int | None = None  # Options trading level (if applicable)
+    options_trading_level: int | None = None  # Alias for options_approved_level
+
+    # Pending transfers
+    pending_transfer_in: Decimal | None = None  # Pending incoming transfers
+    pending_transfer_out: Decimal | None = None  # Pending outgoing transfers
+
+    # Fees
+    accrued_fees: Decimal = Decimal(0)  # Unpaid fees accrued on account
+
+    # Timestamps
+    created_at: datetime | None = None  # Account creation timestamp
+
+    def is_active(self) -> bool:
+        """Check if account is active for trading."""
+        return self.status == AccountStatus.ACTIVE
+
+    def can_trade(self) -> bool:
+        """Check if account can place trades.
+
+        Returns False if:
+        - Account status is not ACTIVE
+        - Trading is blocked
+        - Account is blocked
+        - Trade suspended by user
+        """
+        return (
+            self.is_active()
+            and not self.trading_blocked
+            and not self.account_blocked
+            and not self.trade_suspended_by_user
+        )
+
+    def can_day_trade(self) -> bool:
+        """Check if account can make day trades.
+
+        PDT rules: If flagged as PDT with equity < $25,000, cannot day trade.
+        Non-PDT accounts can make up to 3 day trades in a 5-day rolling period.
+        """
+        if not self.can_trade():
+            return False
+
+        # PDT accounts need $25k+ equity
+        if self.pattern_day_trader:
+            return self.equity >= PDT_EQUITY_THRESHOLD
+
+        # Non-PDT accounts can make limited day trades
+        return self.day_trade_count < PDT_MAX_DAY_TRADES
+
+    def get_available_day_trades(self) -> int:
+        """Get number of day trades available for non-PDT accounts."""
+        if self.pattern_day_trader:
+            return -1  # Unlimited (if equity >= $25k)
+        return max(0, PDT_MAX_DAY_TRADES - self.day_trade_count)
+
+    def can_short(self) -> bool:
+        """Check if account can short sell."""
+        return self.can_trade() and self.shorting_enabled
+
+    def get_margin_multiplier(self) -> int:
+        """Get the margin multiplier as an integer."""
+        try:
+            return int(self.multiplier)
+        except (ValueError, TypeError):
+            return 1
 
 
 @dataclass
@@ -788,17 +891,86 @@ class AlpacaBroker:
             return False
 
     def get_account(self) -> AccountInfo | None:
-        """Get account information including PDT status."""
+        """Get complete account information from Alpaca.
+
+        Returns all account fields including status, balances, margin info,
+        and trading permissions per Alpaca's Account API documentation.
+        """
         try:
             account = self._retry_with_backoff(self._trading_client.get_account)
+
+            # Parse account status to enum
+            try:
+                status = AccountStatus(account.status.value if hasattr(account.status, 'value') else str(account.status))
+            except ValueError:
+                logger.warning(f"Unknown account status: {account.status}, defaulting to ACTIVE")
+                status = AccountStatus.ACTIVE
+
+            # Parse created_at timestamp
+            created_at = None
+            if account.created_at:
+                if isinstance(account.created_at, datetime):
+                    created_at = account.created_at
+                elif isinstance(account.created_at, str):
+                    try:
+                        created_at = datetime.fromisoformat(account.created_at.replace('Z', '+00:00'))
+                    except ValueError:
+                        logger.warning(f"Could not parse created_at: {account.created_at}")
+
             return AccountInfo(
+                # Account identification
+                account_number=account.account_number or "",
+                status=status,
+                crypto_status=getattr(account, 'crypto_status', None),
+                currency=getattr(account, 'currency', 'USD') or 'USD',
+
+                # Cash and equity
                 equity=Decimal(str(account.equity)),
                 cash=Decimal(str(account.cash)),
+                last_equity=Decimal(str(account.last_equity)) if account.last_equity else Decimal(str(account.equity)),
+
+                # Buying power
                 buying_power=Decimal(str(account.buying_power)),
-                portfolio_value=Decimal(str(account.portfolio_value)),
+                regt_buying_power=Decimal(str(account.regt_buying_power)) if account.regt_buying_power else Decimal(str(account.buying_power)),
+                daytrading_buying_power=Decimal(str(account.daytrading_buying_power)) if account.daytrading_buying_power else None,
+                non_marginable_buying_power=Decimal(str(account.non_marginable_buying_power)) if account.non_marginable_buying_power else Decimal(0),
+
+                # Portfolio values
+                portfolio_value=Decimal(str(account.portfolio_value)) if account.portfolio_value else Decimal(str(account.equity)),
+                long_market_value=Decimal(str(account.long_market_value)) if account.long_market_value else Decimal(0),
+                short_market_value=Decimal(str(account.short_market_value)) if account.short_market_value else Decimal(0),
+
+                # Margin info
+                initial_margin=Decimal(str(account.initial_margin)) if account.initial_margin else Decimal(0),
+                maintenance_margin=Decimal(str(account.maintenance_margin)) if account.maintenance_margin else Decimal(0),
+                last_maintenance_margin=Decimal(str(account.last_maintenance_margin)) if account.last_maintenance_margin else Decimal(0),
+                sma=Decimal(str(account.sma)) if account.sma else Decimal(0),
+                multiplier=str(account.multiplier) if account.multiplier else "1",
+
+                # Day trading
                 day_trade_count=account.daytrade_count or 0,
                 pattern_day_trader=account.pattern_day_trader or False,
-                daytrading_buying_power=Decimal(str(account.daytrading_buying_power)) if account.daytrading_buying_power else None,
+
+                # Trading restrictions
+                trading_blocked=account.trading_blocked or False,
+                transfers_blocked=account.transfers_blocked or False,
+                account_blocked=account.account_blocked or False,
+                trade_suspended_by_user=account.trade_suspended_by_user or False,
+
+                # Account features
+                shorting_enabled=account.shorting_enabled or False,
+                options_approved_level=getattr(account, 'options_approved_level', None),
+                options_trading_level=getattr(account, 'options_trading_level', None),
+
+                # Pending transfers
+                pending_transfer_in=Decimal(str(account.pending_transfer_in)) if getattr(account, 'pending_transfer_in', None) else None,
+                pending_transfer_out=Decimal(str(account.pending_transfer_out)) if getattr(account, 'pending_transfer_out', None) else None,
+
+                # Fees
+                accrued_fees=Decimal(str(account.accrued_fees)) if account.accrued_fees else Decimal(0),
+
+                # Timestamps
+                created_at=created_at,
             )
         except Exception as e:
             logger.error(f"Failed to get account info: {e}")
