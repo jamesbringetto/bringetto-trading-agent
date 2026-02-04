@@ -51,6 +51,17 @@ class Settings(BaseSettings):
     avoid_first_minutes: int = Field(default=5, ge=0)
     avoid_last_minutes: int = Field(default=5, ge=0)
 
+    # 24/5 Extended Hours Trading
+    # Per Alpaca: Overnight 8PM-4AM, Pre-market 4AM-9:30AM, After-hours 4PM-8PM
+    enable_extended_hours: bool = Field(
+        default=True,
+        description="Enable pre-market and after-hours trading (4AM-8PM ET)",
+    )
+    enable_overnight_trading: bool = Field(
+        default=False,
+        description="Enable overnight trading (8PM-4AM ET). Only LIMIT orders with DAY/GTC TIF supported.",
+    )
+
     # Strategy Toggles
     enable_orb: bool = Field(default=True)
     enable_vwap_reversion: bool = Field(default=True)

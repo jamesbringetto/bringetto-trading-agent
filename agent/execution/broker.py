@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from alpaca.common.exceptions import APIError
 from alpaca.data.enums import DataFeed
@@ -41,8 +42,11 @@ from alpaca.trading.requests import (
 from alpaca.trading.stream import TradingStream
 from loguru import logger
 
-from agent.config.constants import OrderSide, OrderStatus
+from agent.config.constants import OrderSide, OrderStatus, TradingSession
 from agent.config.settings import get_settings
+
+# Eastern timezone for trading session calculations
+ET = ZoneInfo("America/New_York")
 
 # Constants for rate limiting
 MAX_RETRIES = 3
@@ -337,6 +341,7 @@ class AlpacaBroker:
         limit_price: Decimal,
         qty: Decimal,
         time_in_force: TimeInForce = TimeInForce.DAY,
+        extended_hours: bool = False,
     ) -> OrderResult:
         """
         Submit a limit order.
@@ -346,9 +351,16 @@ class AlpacaBroker:
             side: Buy or sell
             limit_price: Limit price
             qty: Number of shares
-            time_in_force: Order duration (default: DAY)
+            time_in_force: Order duration (default: DAY). For overnight trading, use DAY or GTC.
+            extended_hours: Enable extended hours trading (pre-market, after-hours, overnight).
+                           Required for 24/5 trading. Only LIMIT orders supported for overnight.
 
         Note: This is a synchronous method as Alpaca's SDK is synchronous.
+
+        24/5 Trading Notes:
+        - Overnight session: 8:00 PM to 4:00 AM ET
+        - Only LIMIT orders with DAY or GTC TIF supported for overnight
+        - DAY orders placed overnight remain active through the next trading day
         """
         try:
             order_data = LimitOrderRequest(
@@ -357,6 +369,7 @@ class AlpacaBroker:
                 limit_price=float(limit_price),
                 qty=float(qty),
                 time_in_force=time_in_force,
+                extended_hours=extended_hours,
             )
 
             order = self._retry_with_backoff(
@@ -882,6 +895,178 @@ class AlpacaBroker:
             )
             logger.info(f"Data stream initialized with {feed.value} feed")
         return self._data_stream
+
+    # =========================================================================
+    # 24/5 Trading Support Methods
+    # =========================================================================
+
+    def get_current_trading_session(self) -> TradingSession:
+        """
+        Determine the current trading session based on Eastern Time.
+
+        Returns:
+            TradingSession enum indicating current session:
+            - OVERNIGHT: 8:00 PM to 4:00 AM ET
+            - PRE_MARKET: 4:00 AM to 9:30 AM ET
+            - REGULAR: 9:30 AM to 4:00 PM ET
+            - AFTER_HOURS: 4:00 PM to 8:00 PM ET
+
+        Note: This does not account for market holidays. Use get_market_hours()
+        to check if the market is actually open.
+        """
+        now = datetime.now(ET)
+        hour = now.hour
+        minute = now.minute
+
+        # Convert to minutes since midnight for easier comparison
+        time_in_minutes = hour * 60 + minute
+
+        # Session boundaries in minutes
+        overnight_start = 20 * 60  # 8:00 PM = 1200
+        pre_market_start = 4 * 60  # 4:00 AM = 240
+        regular_start = 9 * 60 + 30  # 9:30 AM = 570
+        regular_end = 16 * 60  # 4:00 PM = 960
+        after_hours_end = 20 * 60  # 8:00 PM = 1200
+
+        if time_in_minutes >= overnight_start or time_in_minutes < pre_market_start:
+            return TradingSession.OVERNIGHT
+        elif time_in_minutes < regular_start:
+            return TradingSession.PRE_MARKET
+        elif time_in_minutes < regular_end:
+            return TradingSession.REGULAR
+        elif time_in_minutes < after_hours_end:
+            return TradingSession.AFTER_HOURS
+        else:
+            return TradingSession.OVERNIGHT
+
+    def is_overnight_tradable(self, symbol: str) -> bool:
+        """
+        Check if an asset is eligible for overnight (24/5) trading.
+
+        Per Alpaca: All NMS securities are eligible for overnight trading.
+        Check the 'overnight_tradable' attribute in the asset details.
+
+        Args:
+            symbol: Stock symbol to check
+
+        Returns:
+            True if the asset supports overnight trading
+        """
+        try:
+            asset = self._trading_client.get_asset(symbol)
+            # Check for overnight_tradable in attributes
+            attributes = getattr(asset, 'attributes', []) or []
+            is_overnight = 'overnight_tradable' in attributes
+
+            logger.debug(f"Asset {symbol} overnight_tradable: {is_overnight}, attributes: {attributes}")
+            return is_overnight
+        except Exception as e:
+            logger.error(f"Failed to check overnight tradability for {symbol}: {e}")
+            return False
+
+    def get_asset_info(self, symbol: str) -> dict[str, Any] | None:
+        """
+        Get detailed asset information including trading eligibility.
+
+        Args:
+            symbol: Stock symbol
+
+        Returns:
+            Dict with asset details including:
+            - tradable: If the asset can be traded
+            - fractionable: If fractional shares are supported
+            - overnight_tradable: If 24/5 overnight trading is supported
+            - marginable: If margin trading is allowed
+            - shortable: If short selling is allowed
+        """
+        try:
+            asset = self._trading_client.get_asset(symbol)
+            attributes = getattr(asset, 'attributes', []) or []
+
+            return {
+                "symbol": asset.symbol,
+                "name": asset.name,
+                "exchange": asset.exchange,
+                "status": asset.status.value if asset.status else None,
+                "tradable": asset.tradable,
+                "fractionable": asset.fractionable,
+                "marginable": asset.marginable,
+                "shortable": asset.shortable,
+                "easy_to_borrow": asset.easy_to_borrow,
+                "overnight_tradable": 'overnight_tradable' in attributes,
+                "has_options": 'has_options' in attributes,
+                "attributes": attributes,
+            }
+        except Exception as e:
+            logger.error(f"Failed to get asset info for {symbol}: {e}")
+            return None
+
+    def get_overnight_quote(
+        self,
+        symbol: str,
+        use_boats_feed: bool = True,
+    ) -> dict[str, Any] | None:
+        """
+        Get latest quote for a symbol during overnight session.
+
+        Per Alpaca docs:
+        - Use feed='boats' for Algo Trader Plus subscribers
+        - Use feed='overnight' for Basic plan subscribers
+        - Overnight data available between 8:00 PM and 4:00 AM ET
+
+        Args:
+            symbol: Stock symbol
+            use_boats_feed: If True, use 'boats' feed (Algo Trader Plus).
+                           If False, use 'overnight' feed (Basic plan).
+
+        Returns:
+            Quote dict with bid, ask, and timestamp
+        """
+        try:
+            # Note: As of alpaca-py, overnight/boats feeds may need to be passed as strings
+            # if the DataFeed enum doesn't include them yet
+            feed_name = "boats" if use_boats_feed else "overnight"
+
+            request = StockLatestQuoteRequest(
+                symbol_or_symbols=symbol,
+                feed=feed_name,  # type: ignore - may not be in DataFeed enum yet
+            )
+            quotes = self._data_client.get_stock_latest_quote(request)
+            quote = quotes[symbol]
+
+            return {
+                "symbol": symbol,
+                "bid": float(quote.bid_price),
+                "ask": float(quote.ask_price),
+                "bid_size": quote.bid_size,
+                "ask_size": quote.ask_size,
+                "timestamp": quote.timestamp.isoformat(),
+                "session": "overnight",
+            }
+        except Exception as e:
+            logger.error(f"Failed to get overnight quote for {symbol}: {e}")
+            return None
+
+    def can_trade_now(self, extended_hours: bool = True, overnight: bool = False) -> bool:
+        """
+        Check if trading is allowed in the current session based on settings.
+
+        Args:
+            extended_hours: If True, allow pre-market and after-hours trading
+            overnight: If True, allow overnight trading (8PM-4AM ET)
+
+        Returns:
+            True if trading is allowed in the current session
+        """
+        session = self.get_current_trading_session()
+
+        if session == TradingSession.REGULAR:
+            return True
+        elif session in (TradingSession.PRE_MARKET, TradingSession.AFTER_HOURS):
+            return extended_hours
+        elif session == TradingSession.OVERNIGHT:
+            return overnight
+        return False
 
 
 class OrderUpdateHandler:
