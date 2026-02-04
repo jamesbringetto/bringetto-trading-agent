@@ -9,6 +9,7 @@ import {
   Settings,
   AlertTriangle,
   BarChart3,
+  Activity,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -17,6 +18,7 @@ const navigation = [
   { name: 'Strategies', href: '/strategies', icon: TrendingUp },
   { name: 'Trades', href: '/trades', icon: History },
   { name: 'Analytics', href: '/analytics', icon: BarChart3 },
+  { name: 'Instrumentation', href: '/instrumentation', icon: Activity },
   { name: 'Settings', href: '/settings', icon: Settings },
 ];
 
