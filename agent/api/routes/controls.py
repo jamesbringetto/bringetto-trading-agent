@@ -8,6 +8,7 @@ from pydantic import BaseModel
 
 from agent.api.auth import require_api_key
 from agent.api.state import get_agent_state, set_agent_state
+from agent.config.constants import TradingSession
 
 # All endpoints in this router require API key authentication
 router = APIRouter(dependencies=[Depends(require_api_key)])
@@ -29,6 +30,8 @@ class TradingStatusResponse(BaseModel):
     can_trade: bool
     reason: str
     circuit_breaker_active: bool
+    current_session: str | None = None
+    session_trading_enabled: bool | None = None
 
 
 @router.post("/kill-switch", response_model=KillSwitchResponse)
@@ -82,14 +85,29 @@ async def activate_kill_switch() -> KillSwitchResponse:
 
 @router.get("/status", response_model=TradingStatusResponse)
 async def get_trading_status() -> TradingStatusResponse:
-    """Get current trading status."""
+    """Get current trading status including 24/5 session information."""
     state = get_agent_state()
     circuit_breaker = state.get("circuit_breaker")
+    broker = state.get("broker")
     is_running = state.get("is_running", False)
 
     can_trade = True
     reason = "Trading enabled"
     cb_active = False
+    current_session = None
+    session_trading_enabled = None
+
+    # Get current trading session from broker
+    if broker:
+        try:
+            session = broker.get_current_trading_session()
+            current_session = session.value
+            session_trading_enabled = broker.can_trade_now(
+                extended_hours=True,
+                overnight=False,  # Default to not allowing overnight
+            )
+        except Exception as e:
+            logger.error(f"Error getting trading session: {e}")
 
     if circuit_breaker:
         can_trade, reason = circuit_breaker.can_trade()
@@ -105,6 +123,8 @@ async def get_trading_status() -> TradingStatusResponse:
         can_trade=can_trade,
         reason=reason,
         circuit_breaker_active=cb_active,
+        current_session=current_session,
+        session_trading_enabled=session_trading_enabled,
     )
 
 
