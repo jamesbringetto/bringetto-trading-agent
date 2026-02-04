@@ -53,7 +53,7 @@ class VWAPReversion(BaseStrategy):
         "position_size_pct": TradingConstants.VWAP_POSITION_SIZE_PCT,
         "max_positions": TradingConstants.VWAP_MAX_POSITIONS,
         "allowed_symbols": list(TradingConstants.TIER_2_ASSETS),
-        "min_volume": 10_000_000,
+        "min_volume": 5_000,  # Per-bar volume (not daily)
     }
 
     def __init__(
