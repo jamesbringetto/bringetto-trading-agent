@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 
 export default function LoginPage() {
   const [password, setPassword] = useState('');
@@ -67,6 +68,16 @@ export default function LoginPage() {
             {loading ? 'Signing in...' : 'Sign In'}
           </button>
         </form>
+
+        <div className="text-center text-sm text-muted-foreground">
+          <Link href="/terms" className="hover:text-foreground hover:underline">
+            Terms of Use
+          </Link>
+          <span className="mx-2">|</span>
+          <Link href="/privacy" className="hover:text-foreground hover:underline">
+            Privacy Policy
+          </Link>
+        </div>
       </div>
     </div>
   );

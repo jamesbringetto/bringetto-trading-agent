@@ -5,9 +5,10 @@ export function middleware(request: NextRequest) {
   const isAuthenticated = authCookie?.value === 'authenticated';
   const isLoginPage = request.nextUrl.pathname === '/login';
   const isAuthApi = request.nextUrl.pathname.startsWith('/api/auth');
+  const isPublicPage = ['/terms', '/privacy'].includes(request.nextUrl.pathname);
 
-  // Allow auth API routes
-  if (isAuthApi) {
+  // Allow auth API routes and public pages (terms, privacy)
+  if (isAuthApi || isPublicPage) {
     return NextResponse.next();
   }
 
