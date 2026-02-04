@@ -25,6 +25,7 @@ from agent.config.constants import TradingSession
 from agent.config.settings import get_settings
 from agent.data.streaming import DataStreamer
 from agent.execution.broker import AlpacaBroker, OrderUpdateHandler
+from agent.monitoring.instrumentation import get_instrumentation
 from agent.monitoring.logger import setup_logging
 from agent.monitoring.metrics import MetricsCollector
 from agent.risk.circuit_breaker import CircuitBreaker
@@ -547,6 +548,9 @@ class TradingAgent:
         # Start WebSocket streaming for trade updates
         await self._start_streaming()
 
+        # Start instrumentation heartbeat for data reception monitoring
+        await get_instrumentation().start_heartbeat()
+
         # Track last logged session to avoid log spam
         last_session = None
         last_can_trade = None
@@ -627,6 +631,9 @@ class TradingAgent:
         """Graceful shutdown of the agent."""
         logger.info("Initiating graceful shutdown...")
         self._shutdown_event.set()
+
+        # Stop instrumentation heartbeat
+        await get_instrumentation().stop_heartbeat()
 
         # Stop WebSocket streaming
         await self._stop_streaming()
