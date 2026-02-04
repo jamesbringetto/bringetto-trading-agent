@@ -17,6 +17,7 @@ import signal
 import sys
 from collections import defaultdict
 from datetime import datetime, timedelta
+from decimal import Decimal
 
 import pytz
 from dateutil import parser as date_parser
@@ -40,7 +41,7 @@ from agent.strategies import (
     OpeningRangeBreakout,
     VWAPReversion,
 )
-from agent.strategies.base import MarketContext
+from agent.strategies.base import BaseStrategy, MarketContext, StrategySignal
 
 # How many seconds before market open to switch to 1-second checks
 PRE_MARKET_READY_SECONDS = 5
@@ -370,7 +371,8 @@ class TradingAgent:
                         f"Signal generated: {strategy.name} | {symbol} | "
                         f"{signal.side.value} @ ${signal.entry_price}"
                     )
-                    # TODO: Validate with risk manager and execute trade
+                    # Validate and execute the trade
+                    self._execute_trade(signal, strategy)
 
         if evaluated_count > 0:
             logger.debug(f"Evaluated {evaluated_count} strategy/symbol combinations")
@@ -383,6 +385,106 @@ class TradingAgent:
         """
         allowed_symbols = strategy.parameters.get("allowed_symbols", [])
         return symbol in allowed_symbols
+
+    def _execute_trade(self, signal: StrategySignal, strategy: BaseStrategy) -> bool:
+        """
+        Execute a trade based on a strategy signal.
+
+        Validates the signal, calculates position size, and submits a bracket order
+        with stop loss and take profit attached.
+
+        Args:
+            signal: The trading signal from the strategy
+            strategy: The strategy that generated the signal
+
+        Returns:
+            True if order was submitted successfully, False otherwise
+        """
+        # Get account info for validation
+        account = self._broker.get_account()
+        if not account:
+            logger.error("Cannot execute trade - failed to get account info")
+            return False
+
+        if not account.can_trade():
+            logger.warning(f"Cannot execute trade - account cannot trade: {account.status}")
+            return False
+
+        # Get current positions for validation
+        positions = self._broker.get_positions()
+        current_positions = len(positions)
+        current_positions_value = sum(p.market_value for p in positions)
+
+        # Validate the signal
+        validation = self._validator.validate_signal(
+            signal=signal,
+            account_value=account.equity,
+            buying_power=account.buying_power,
+            current_positions=current_positions,
+            current_positions_value=current_positions_value,
+        )
+
+        if not validation.is_valid:
+            logger.warning(
+                f"Signal validation failed for {signal.symbol}: {validation.reason}"
+            )
+            return False
+
+        # Log warnings if any
+        for warning in validation.warnings:
+            logger.warning(f"Trade warning for {signal.symbol}: {warning}")
+
+        # Calculate position size in shares
+        position_value = account.equity * Decimal(signal.position_size_pct / 100)
+        shares = int(position_value / signal.entry_price)
+
+        if shares < 1:
+            logger.warning(
+                f"Position size too small for {signal.symbol}: "
+                f"${position_value:.2f} / ${signal.entry_price} = {shares} shares"
+            )
+            return False
+
+        # Submit bracket order with stop loss and take profit
+        logger.info(
+            f"Executing trade: {signal.side.value} {shares} {signal.symbol} @ ~${signal.entry_price} | "
+            f"SL=${signal.stop_loss} | TP=${signal.take_profit} | "
+            f"Strategy={strategy.name}"
+        )
+
+        result = self._broker.submit_bracket_order(
+            symbol=signal.symbol,
+            side=signal.side,
+            qty=Decimal(shares),
+            take_profit_price=signal.take_profit,
+            stop_loss_price=signal.stop_loss,
+            entry_type="market",  # Use market order for immediate fill
+        )
+
+        if result.success:
+            logger.info(
+                f"Order submitted successfully: {signal.symbol} | "
+                f"Order ID: {result.order_id} | Status: {result.status.value}"
+            )
+            # Mark that strategy has a position in this symbol
+            position_data = {
+                "order_id": result.order_id,
+                "symbol": signal.symbol,
+                "side": signal.side.value,
+                "qty": shares,
+                "entry_price": float(signal.entry_price),
+                "stop_loss": float(signal.stop_loss),
+                "take_profit": float(signal.take_profit),
+                "strategy": strategy.name,
+                "timestamp": datetime.now(self._et_tz).isoformat(),
+            }
+            strategy.add_position(signal.symbol, position_data)
+            return True
+        else:
+            logger.error(
+                f"Order submission failed for {signal.symbol}: {result.message}"
+            )
+            return False
 
     def _on_circuit_breaker_trigger(self, reason: str) -> None:
         """Callback when circuit breaker is triggered."""
