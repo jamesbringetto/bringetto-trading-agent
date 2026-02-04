@@ -217,6 +217,49 @@ class TradingConstants:
     TIER_1_ASSETS: tuple[str, ...] = ("SPY", "QQQ", "IWM")
     TIER_2_ASSETS: tuple[str, ...] = ("AAPL", "MSFT", "NVDA", "TSLA", "GOOGL", "AMZN", "META")
 
+    # S&P 500 Components (most liquid stocks for paper trading experimentation)
+    # Organized by sector for clarity
+    SP500_ASSETS: tuple[str, ...] = (
+        # Major ETFs
+        "SPY", "QQQ", "IWM", "DIA",
+        # Technology
+        "AAPL", "MSFT", "NVDA", "GOOGL", "GOOG", "META", "AVGO", "ADBE", "CRM", "CSCO",
+        "AMD", "INTC", "ORCL", "ACN", "IBM", "QCOM", "TXN", "NOW", "INTU", "AMAT",
+        "MU", "ADI", "LRCX", "KLAC", "SNPS", "CDNS", "MRVL", "FTNT", "PANW",
+        # Consumer Discretionary
+        "AMZN", "TSLA", "HD", "MCD", "NKE", "LOW", "SBUX", "TJX", "BKNG", "CMG",
+        "ORLY", "AZO", "ROST", "DHI", "LEN", "GM", "F", "MAR", "HLT",
+        # Communication Services
+        "NFLX", "DIS", "CMCSA", "VZ", "T", "TMUS", "CHTR", "EA", "TTWO", "WBD",
+        # Financials
+        "JPM", "V", "MA", "BAC", "WFC", "GS", "MS", "AXP", "BLK", "SCHW",
+        "C", "USB", "PNC", "TFC", "COF", "BK", "AIG", "MET", "PRU", "ALL",
+        "CB", "MMC", "AON", "ICE", "CME", "SPGI", "MCO", "MSCI",
+        # Healthcare
+        "UNH", "JNJ", "LLY", "PFE", "ABBV", "MRK", "TMO", "ABT", "DHR", "BMY",
+        "AMGN", "GILD", "VRTX", "REGN", "ISRG", "MDT", "SYK", "BDX", "ZTS", "CI",
+        "ELV", "HUM", "CVS", "MCK", "CAH",
+        # Consumer Staples
+        "PG", "KO", "PEP", "COST", "WMT", "PM", "MO", "MDLZ", "CL", "KMB",
+        "GIS", "K", "HSY", "SJM", "EL", "STZ", "KHC", "KDP", "MNST",
+        # Industrials
+        "CAT", "DE", "UNP", "UPS", "HON", "RTX", "BA", "GE", "LMT", "MMM",
+        "EMR", "ETN", "ITW", "PH", "ROK", "CMI", "PCAR", "NSC", "CSX", "FDX",
+        "WM", "RSG", "FAST", "CTAS", "PAYX", "VRSK",
+        # Energy
+        "XOM", "CVX", "COP", "SLB", "EOG", "MPC", "PSX", "VLO", "OXY", "PXD",
+        "DVN", "HAL", "BKR", "FANG", "HES",
+        # Materials
+        "LIN", "APD", "SHW", "ECL", "FCX", "NEM", "NUE", "DD", "DOW", "PPG",
+        "VMC", "MLM", "ALB", "CF", "MOS",
+        # Utilities
+        "NEE", "DUK", "SO", "D", "AEP", "EXC", "SRE", "XEL", "PEG", "ED",
+        "WEC", "ES", "AWK", "AEE",
+        # Real Estate
+        "PLD", "AMT", "EQIX", "CCI", "PSA", "O", "WELL", "DLR", "SPG", "AVB",
+        "EQR", "VTR", "ARE", "MAA", "UDR",
+    )
+
     # Minimum requirements
     MIN_STOCK_PRICE: float = 5.0
     MIN_DAILY_VOLUME: int = 5_000_000
