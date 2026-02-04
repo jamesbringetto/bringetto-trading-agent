@@ -217,6 +217,51 @@ export interface Quote {
   error?: string;
 }
 
+// Instrumentation types
+export interface DataReceptionStats {
+  total_bars: number;
+  total_quotes: number;
+  total_trades: number;
+  unique_symbols_bars: number;
+  unique_symbols_quotes: number;
+  unique_symbols_trades: number;
+  first_data_time: string | null;
+  last_data_time: string | null;
+  data_freshness_seconds: number | null;
+  bars_per_second: number;
+  quotes_per_second: number;
+  trades_per_second: number;
+}
+
+export interface StrategyEvaluation {
+  id: string;
+  timestamp: string;
+  strategy_name: string;
+  symbol: string;
+  evaluation_type: 'entry' | 'exit';
+  decision: 'accepted' | 'rejected' | 'skipped';
+  context: Record<string, unknown>;
+  rejection_reason: string | null;
+  signal: Record<string, unknown> | null;
+}
+
+export interface EvaluationSummary {
+  total_evaluations: number;
+  accepted: number;
+  rejected: number;
+  skipped: number;
+  acceptance_rate: number;
+  by_strategy: Record<string, { total: number; accepted: number; rejected: number }>;
+  by_symbol: Record<string, number>;
+  time_window_minutes: number;
+}
+
+export interface InstrumentationStatus {
+  data_reception: DataReceptionStats;
+  evaluations: EvaluationSummary;
+  recent_accepted_signals: StrategyEvaluation[];
+}
+
 // ============================================================================
 // API Client
 // ============================================================================
@@ -448,6 +493,39 @@ class ApiClient {
 
   async getQuote(symbol: string): Promise<Quote> {
     return this.fetch<Quote>(`/api/market/quote/${symbol}`);
+  }
+
+  // --------------------------------------------------------------------------
+  // Instrumentation
+  // --------------------------------------------------------------------------
+
+  async getInstrumentationStatus(): Promise<InstrumentationStatus> {
+    return this.fetch<InstrumentationStatus>('/api/instrumentation/');
+  }
+
+  async getDataReceptionStats(): Promise<DataReceptionStats> {
+    return this.fetch<DataReceptionStats>('/api/instrumentation/data-reception');
+  }
+
+  async getEvaluations(
+    minutes: number = 60,
+    strategyName?: string,
+    symbol?: string,
+    decision?: string,
+    limit: number = 100
+  ): Promise<StrategyEvaluation[]> {
+    const params = new URLSearchParams({
+      minutes: minutes.toString(),
+      limit: limit.toString(),
+    });
+    if (strategyName) params.append('strategy_name', strategyName);
+    if (symbol) params.append('symbol', symbol);
+    if (decision) params.append('decision', decision);
+    return this.fetch<StrategyEvaluation[]>(`/api/instrumentation/evaluations?${params}`);
+  }
+
+  async getEvaluationSummary(minutes: number = 60): Promise<EvaluationSummary> {
+    return this.fetch<EvaluationSummary>(`/api/instrumentation/evaluations/summary?minutes=${minutes}`);
   }
 }
 
