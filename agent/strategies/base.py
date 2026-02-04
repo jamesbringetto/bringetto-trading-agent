@@ -221,8 +221,8 @@ class BaseStrategy(ABC):
         if float(context.current_price) < min_price:
             return False, f"Price ${context.current_price} below minimum ${min_price}"
 
-        # Check volume
-        min_volume = self.parameters.get("min_volume", 1_000_000)
+        # Check volume (per-bar volume, not daily)
+        min_volume = self.parameters.get("min_volume", 5_000)
         if context.volume < min_volume:
             return False, f"Volume {context.volume} below minimum {min_volume}"
 

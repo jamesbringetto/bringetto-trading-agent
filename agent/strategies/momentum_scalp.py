@@ -41,7 +41,7 @@ class MomentumScalp(BaseStrategy):
         "position_size_pct": TradingConstants.MOMENTUM_POSITION_SIZE_PCT,
         "max_positions": TradingConstants.MOMENTUM_MAX_POSITIONS,
         "allowed_symbols": list(TradingConstants.TIER_1_ASSETS + TradingConstants.TIER_2_ASSETS),
-        "min_volume": 5_000_000,
+        "min_volume": 10_000,  # Per-bar volume (higher for scalping)
         "min_price": 10.0,
     }
 
