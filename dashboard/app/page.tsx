@@ -67,8 +67,8 @@ export default function Dashboard() {
           title="Daily P&L"
           value={portfolio ? formatCurrency(portfolio.daily_pnl) : '-'}
           subtitle={portfolio ? formatPercent(portfolio.daily_pnl_pct) : undefined}
-          icon={portfolio?.daily_pnl >= 0 ? TrendingUp : TrendingDown}
-          trend={portfolio?.daily_pnl >= 0 ? 'up' : 'down'}
+          icon={(portfolio?.daily_pnl ?? 0) >= 0 ? TrendingUp : TrendingDown}
+          trend={(portfolio?.daily_pnl ?? 0) >= 0 ? 'up' : 'down'}
           loading={isLoading}
         />
         <StatusCard
