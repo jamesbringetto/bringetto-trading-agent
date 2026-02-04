@@ -25,6 +25,7 @@ from loguru import logger
 from agent.api.state import set_agent_state
 from agent.config.constants import TradingConstants, TradingSession
 from agent.config.settings import get_settings
+from agent.data.indicators import IndicatorCalculator
 from agent.data.streaming import BarData, DataStreamer, QuoteData
 from agent.execution.broker import AlpacaBroker, OrderUpdateHandler
 from agent.monitoring.instrumentation import get_instrumentation
@@ -231,6 +232,7 @@ class TradingAgent:
         Build MarketContext for a symbol from cached data.
 
         Returns None if insufficient data is available.
+        Calculates technical indicators (RSI, MACD, MA50, MA200, ATR) from daily bars.
         """
         bar = self._latest_bars.get(symbol)
         quote = self._latest_quotes.get(symbol)
@@ -251,6 +253,9 @@ class TradingAgent:
             low_price = bar.low
             total_volume = bar.volume
 
+        # Calculate technical indicators from daily bars
+        indicators = IndicatorCalculator.calculate_all(daily_bars)
+
         return MarketContext(
             symbol=symbol,
             current_price=bar.close,
@@ -262,6 +267,14 @@ class TradingAgent:
             bid=quote.bid if quote else None,
             ask=quote.ask if quote else None,
             timestamp=bar.timestamp,
+            # Technical indicators
+            rsi=indicators["rsi"],
+            macd=indicators["macd"],
+            macd_signal=indicators["macd_signal"],
+            ma_50=indicators["ma_50"],
+            ma_200=indicators["ma_200"],
+            atr=indicators["atr"],
+            adx=indicators["adx"],
         )
 
     async def _start_market_data_streaming(self) -> None:
