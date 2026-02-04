@@ -7,7 +7,29 @@ import sys
 import time
 
 
+def run_db_init():
+    """Run database initialization (migrations + seeding)."""
+    print("=" * 50, flush=True)
+    print("Running database initialization...", flush=True)
+    print("=" * 50, flush=True)
+
+    result = subprocess.run(
+        [sys.executable, "scripts/init_db.py"],
+        stdout=sys.stdout,
+        stderr=sys.stderr,
+    )
+
+    if result.returncode != 0:
+        print(f"WARNING: Database init exited with code {result.returncode}", flush=True)
+        print("Continuing with startup anyway...", flush=True)
+    else:
+        print("Database initialization complete!", flush=True)
+
+
 def main():
+    # Run database migrations first
+    run_db_init()
+
     port = os.environ.get("PORT", "8080")
 
     print(f"Starting API server on port {port}...", flush=True)
