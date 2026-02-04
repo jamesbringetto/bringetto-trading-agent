@@ -50,6 +50,8 @@ export interface TradingStatus {
   can_trade: boolean;
   reason: string;
   circuit_breaker_active: boolean;
+  current_session?: 'overnight' | 'pre_market' | 'regular' | 'after_hours' | null;
+  session_trading_enabled?: boolean | null;
 }
 
 export interface PortfolioSummary {

@@ -1,15 +1,23 @@
-"""Main entry point for the Bringetto Trading Agent."""
+"""Main entry point for the Bringetto Trading Agent.
+
+24/5 Trading Support:
+- Paper trading runs from Sunday 8 PM ET through Friday 8 PM ET continuously
+- Trading sessions: Overnight (8PM-4AM), Pre-market (4AM-9:30AM),
+  Regular (9:30AM-4PM), After-hours (4PM-8PM)
+- Weekend closure: Friday 8 PM ET through Sunday 8 PM ET
+"""
 
 import asyncio
 import signal
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pytz
 from dateutil import parser as date_parser
 from loguru import logger
 
 from agent.api.state import set_agent_state
+from agent.config.constants import TradingSession
 from agent.config.settings import get_settings
 from agent.execution.broker import AlpacaBroker
 from agent.monitoring.logger import setup_logging
@@ -26,6 +34,13 @@ from agent.strategies import (
 
 # How many seconds before market open to switch to 1-second checks
 PRE_MARKET_READY_SECONDS = 5
+
+# Weekend closure times (in Eastern Time)
+# Trading closes Friday 8 PM ET and reopens Sunday 8 PM ET
+WEEKEND_CLOSE_DAY = 4  # Friday
+WEEKEND_CLOSE_HOUR = 20  # 8 PM
+WEEKEND_OPEN_DAY = 6  # Sunday
+WEEKEND_OPEN_HOUR = 20  # 8 PM
 
 
 class TradingAgent:
@@ -100,6 +115,116 @@ class TradingAgent:
         logger.critical(f"CIRCUIT BREAKER TRIGGERED: {reason}")
         # TODO: Send alerts (Slack, email)
         # TODO: Close all positions if severe
+
+    # =========================================================================
+    # 24/5 Trading Methods
+    # =========================================================================
+
+    def _is_weekend_closure(self) -> bool:
+        """
+        Check if we're in the weekend closure period.
+
+        24/5 trading is available from Sunday 8 PM ET through Friday 8 PM ET.
+        Weekend closure is from Friday 8 PM ET through Sunday 8 PM ET.
+
+        Returns:
+            True if in weekend closure period (no trading available)
+        """
+        now = self._get_market_time()
+        weekday = now.weekday()  # Monday = 0, Sunday = 6
+        hour = now.hour
+
+        # Friday after 8 PM ET
+        if weekday == WEEKEND_CLOSE_DAY and hour >= WEEKEND_CLOSE_HOUR:
+            return True
+
+        # Saturday (all day)
+        if weekday == 5:  # Saturday
+            return True
+
+        # Sunday before 8 PM ET
+        if weekday == WEEKEND_OPEN_DAY and hour < WEEKEND_OPEN_HOUR:
+            return True
+
+        return False
+
+    def _get_seconds_until_24_5_open(self) -> float:
+        """
+        Calculate seconds until 24/5 trading window opens.
+
+        Returns:
+            Seconds until Sunday 8 PM ET when trading resumes.
+            Returns 0 if already within the trading window.
+        """
+        if not self._is_weekend_closure():
+            return 0
+
+        now = self._get_market_time()
+        weekday = now.weekday()
+
+        # Calculate next Sunday 8 PM ET
+        if weekday == WEEKEND_CLOSE_DAY:  # Friday
+            # Next Sunday is 2 days away
+            days_until_sunday = 2
+        elif weekday == 5:  # Saturday
+            # Next Sunday is 1 day away
+            days_until_sunday = 1
+        else:  # Sunday
+            days_until_sunday = 0
+
+        # Create target datetime (Sunday 8 PM ET)
+        target = now.replace(
+            hour=WEEKEND_OPEN_HOUR,
+            minute=0,
+            second=0,
+            microsecond=0,
+        ) + timedelta(days=days_until_sunday)
+
+        seconds_until_open = (target - now).total_seconds()
+        return max(0, seconds_until_open)
+
+    def _get_current_session(self) -> TradingSession:
+        """Get the current trading session from the broker."""
+        return self._broker.get_current_trading_session()
+
+    def _can_trade_in_session(self) -> tuple[bool, str]:
+        """
+        Check if trading is allowed in the current session based on settings.
+
+        Considers:
+        - Weekend closure (no trading Friday 8 PM - Sunday 8 PM ET)
+        - Extended hours settings (pre-market, after-hours)
+        - Overnight trading settings
+        - Circuit breaker status
+
+        Returns:
+            Tuple of (can_trade, reason)
+        """
+        # Check weekend closure first
+        if self._is_weekend_closure():
+            return False, "Weekend closure (Friday 8 PM - Sunday 8 PM ET)"
+
+        # Get current session
+        session = self._get_current_session()
+        settings = self._settings
+
+        # Regular hours always allowed
+        if session == TradingSession.REGULAR:
+            return True, "Regular market hours"
+
+        # Pre-market and after-hours
+        if session in (TradingSession.PRE_MARKET, TradingSession.AFTER_HOURS):
+            if settings.enable_extended_hours:
+                return True, f"{session.value.replace('_', ' ').title()} session"
+            return False, f"{session.value.replace('_', ' ').title()} trading disabled"
+
+        # Overnight session
+        if session == TradingSession.OVERNIGHT:
+            if settings.enable_overnight_trading:
+                return True, "Overnight session (LIMIT orders only)"
+            return False, "Overnight trading disabled"
+
+        return False, f"Unknown session: {session}"
 
     def _get_market_time(self) -> datetime:
         """Get current time in Eastern timezone."""
@@ -185,6 +310,35 @@ class TradingAgent:
                 logger.info(f"Market opens in {time_str} - sleeping for {sleep_time:.0f}s")
                 await asyncio.sleep(sleep_time)
 
+    async def _wait_for_24_5_window(self) -> None:
+        """
+        Wait for the 24/5 trading window to open (Sunday 8 PM ET).
+
+        During weekend closure (Friday 8 PM - Sunday 8 PM ET), this method
+        will sleep efficiently until trading resumes.
+        """
+        while not self._shutdown_event.is_set() and self._is_weekend_closure():
+            seconds_until_open = self._get_seconds_until_24_5_open()
+
+            if seconds_until_open == 0:
+                return
+
+            # Sleep in chunks (max 5 minutes) to allow shutdown checks
+            sleep_time = min(seconds_until_open, 300)
+
+            hours, remainder = divmod(int(seconds_until_open), 3600)
+            minutes, seconds = divmod(remainder, 60)
+
+            if hours > 0:
+                time_str = f"{hours}h {minutes}m {seconds}s"
+            elif minutes > 0:
+                time_str = f"{minutes}m {seconds}s"
+            else:
+                time_str = f"{seconds}s"
+
+            logger.info(f"Weekend closure - 24/5 trading opens in {time_str}")
+            await asyncio.sleep(sleep_time)
+
     async def _check_strategies(self) -> None:
         """Check if any strategies should be auto-disabled."""
         for strategy in self._strategies:
@@ -210,10 +364,24 @@ class TradingAgent:
         logger.info("Daily reset complete")
 
     async def run(self) -> None:
-        """Main run loop for the trading agent."""
-        logger.info("Starting Trading Agent...")
+        """
+        Main run loop for the trading agent.
+
+        Supports 24/5 trading:
+        - Active from Sunday 8 PM ET through Friday 8 PM ET
+        - Sleeps during weekend closure (Friday 8 PM - Sunday 8 PM ET)
+        - Respects extended hours and overnight trading settings
+        """
+        logger.info("Starting Trading Agent with 24/5 support...")
         self._is_running = True
         set_agent_state("is_running", True)
+
+        # Log 24/5 trading configuration
+        logger.info(
+            f"24/5 Trading Config - "
+            f"Extended hours: {self._settings.enable_extended_hours}, "
+            f"Overnight trading: {self._settings.enable_overnight_trading}"
+        )
 
         # Check account status
         account = self._broker.get_account()
@@ -228,29 +396,46 @@ class TradingAgent:
             logger.error("Failed to get account info - check API credentials")
             return
 
+        # Track last logged session to avoid log spam
+        last_session = None
+        last_can_trade = None
+
         # Main loop
         try:
             while not self._shutdown_event.is_set():
                 try:
-                    # Wait for market to open (smart waiting)
-                    if not self._is_market_open():
-                        logger.info("Market is closed - waiting for open...")
-                        await self._wait_for_market_open()
+                    # Check weekend closure first
+                    if self._is_weekend_closure():
+                        logger.info("Weekend closure detected - waiting for Sunday 8 PM ET...")
+                        await self._wait_for_24_5_window()
 
-                        # Double-check after waiting (in case of shutdown or error)
                         if self._shutdown_event.is_set():
                             break
-                        if not self._is_market_open():
-                            continue
+                        continue
 
-                    logger.info("Market is OPEN - starting trading loop")
+                    # We're within the 24/5 window (Sunday 8 PM - Friday 8 PM)
+                    current_session = self._get_current_session()
+                    can_trade_session, session_reason = self._can_trade_in_session()
 
-                    # Inner loop while market is open
-                    while not self._shutdown_event.is_set() and self._is_market_open():
+                    # Log session changes
+                    if current_session != last_session:
+                        logger.info(f"Session change: {current_session.value} - {session_reason}")
+                        last_session = current_session
+
+                    # Log trading availability changes
+                    if can_trade_session != last_can_trade:
+                        if can_trade_session:
+                            logger.info(f"Trading ENABLED: {session_reason}")
+                        else:
+                            logger.info(f"Trading DISABLED: {session_reason}")
+                        last_can_trade = can_trade_session
+
+                    # If we can trade in this session, run the trading loop
+                    if can_trade_session:
                         # Check circuit breaker
-                        can_trade, reason = self._circuit_breaker.can_trade()
-                        if not can_trade:
-                            logger.warning(f"Trading paused: {reason}")
+                        can_trade_cb, cb_reason = self._circuit_breaker.can_trade()
+                        if not can_trade_cb:
+                            logger.warning(f"Circuit breaker active: {cb_reason}")
                             await asyncio.sleep(60)
                             continue
 
@@ -259,16 +444,22 @@ class TradingAgent:
 
                         # Process strategies
                         # In a real implementation, this would:
-                        # 1. Get market data
+                        # 1. Get market data (use appropriate feed for session)
                         # 2. Pass to strategies for signal generation
-                        # 3. Validate signals
-                        # 4. Execute trades
+                        # 3. Validate signals (check order type restrictions for overnight)
+                        # 4. Execute trades (LIMIT only for overnight session)
                         # 5. Monitor positions
 
-                        # Trading loop runs every second when market is open
-                        await asyncio.sleep(1)
+                        # Note: During overnight session, only LIMIT orders with
+                        # DAY or GTC TIF are supported. Strategies should be aware
+                        # of this and adjust their order types accordingly.
 
-                    logger.info("Market is CLOSED - exiting trading loop")
+                        # Trading loop runs every second during active sessions
+                        await asyncio.sleep(1)
+                    else:
+                        # Can't trade in this session, but stay awake to monitor
+                        # Check every 30 seconds for session changes
+                        await asyncio.sleep(30)
 
                 except Exception as e:
                     logger.error(f"Error in main loop: {e}")
@@ -314,12 +505,18 @@ async def main() -> None:
 
     logger.info("=" * 60)
     logger.info("BRINGETTO TRADING AGENT")
+    logger.info("24/5 Trading Enabled")
     logger.info("=" * 60)
 
     settings = get_settings()
     logger.info(f"Environment: {settings.environment}")
     logger.info(f"Trading Mode: {settings.trading_mode}")
     logger.info(f"Paper Trading Capital: ${settings.paper_trading_capital:,.2f}")
+    logger.info("-" * 60)
+    logger.info("24/5 Trading Configuration:")
+    logger.info(f"  Extended Hours (4AM-8PM ET): {settings.enable_extended_hours}")
+    logger.info(f"  Overnight Trading (8PM-4AM ET): {settings.enable_overnight_trading}")
+    logger.info("  Trading Window: Sunday 8 PM ET - Friday 8 PM ET")
     logger.info("=" * 60)
 
     # Create and run agent
