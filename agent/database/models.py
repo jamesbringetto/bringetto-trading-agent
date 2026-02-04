@@ -44,7 +44,10 @@ class Strategy(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name = Column(String(50), nullable=False, unique=True)
     version = Column(String(20), nullable=False, default="1.0.0")
-    type = Column(Enum(StrategyType), nullable=False)
+    type = Column(
+        Enum(StrategyType, values_callable=lambda x: [e.value for e in x]),
+        nullable=False,
+    )
     parameters = Column(JSONB, nullable=False, default=dict)
     is_active = Column(Boolean, default=True, nullable=False)
     is_experimental = Column(Boolean, default=False, nullable=False)
@@ -79,14 +82,21 @@ class Trade(Base):
     strategy_id = Column(
         UUID(as_uuid=True), ForeignKey("strategies.id"), nullable=False
     )
-    side = Column(Enum(OrderSide), nullable=False)
+    side = Column(
+        Enum(OrderSide, values_callable=lambda x: [e.value for e in x]),
+        nullable=False,
+    )
     entry_price = Column(Numeric(10, 2), nullable=False)
     exit_price = Column(Numeric(10, 2), nullable=True)
     quantity = Column(Numeric(10, 4), nullable=False)
     pnl = Column(Numeric(10, 2), nullable=True)
     pnl_percent = Column(Numeric(5, 2), nullable=True)
     commission = Column(Numeric(10, 2), default=0)
-    status = Column(Enum(TradeStatus), nullable=False, default=TradeStatus.OPEN)
+    status = Column(
+        Enum(TradeStatus, values_callable=lambda x: [e.value for e in x]),
+        nullable=False,
+        default=TradeStatus.OPEN,
+    )
     entry_time = Column(DateTime(timezone=True), nullable=False)
     exit_time = Column(DateTime(timezone=True), nullable=True)
     holding_time_seconds = Column(Integer, nullable=True)
@@ -126,7 +136,10 @@ class TradeDecision(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     trade_id = Column(UUID(as_uuid=True), ForeignKey("trades.id"), nullable=True)
     timestamp = Column(DateTime(timezone=True), nullable=False, default=func.now())
-    decision_type = Column(Enum(DecisionType), nullable=False)
+    decision_type = Column(
+        Enum(DecisionType, values_callable=lambda x: [e.value for e in x]),
+        nullable=False,
+    )
     strategy_name = Column(String(50), nullable=False)
     strategy_version = Column(String(20), nullable=False)
 
@@ -271,7 +284,10 @@ class MarketRegimeRecord(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     timestamp = Column(DateTime(timezone=True), nullable=False, default=func.now())
     symbol = Column(String(10), nullable=False, index=True)
-    regime_type = Column(Enum(MarketRegime), nullable=False)
+    regime_type = Column(
+        Enum(MarketRegime, values_callable=lambda x: [e.value for e in x]),
+        nullable=False,
+    )
     adx = Column(Numeric(5, 2), nullable=True)
     vix = Column(Numeric(5, 2), nullable=True)
     volume_ratio = Column(Numeric(5, 2), nullable=True)
@@ -323,7 +339,10 @@ class Alert(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     timestamp = Column(DateTime(timezone=True), nullable=False, default=func.now())
-    severity = Column(Enum(AlertSeverity), nullable=False)
+    severity = Column(
+        Enum(AlertSeverity, values_callable=lambda x: [e.value for e in x]),
+        nullable=False,
+    )
     type = Column(String(50), nullable=False)
     message = Column(Text, nullable=False)
     is_read = Column(Boolean, default=False, nullable=False)
