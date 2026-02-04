@@ -427,13 +427,19 @@ class TradingAgent:
         """
         Build MarketContext for a symbol from cached data.
 
-        Returns None if insufficient data is available.
+        Returns None if insufficient data is available or data is stale.
         Calculates technical indicators (RSI, MACD, MA50, MA200, ATR) from daily bars.
         """
         bar = self._latest_bars.get(symbol)
         quote = self._latest_quotes.get(symbol)
 
         if bar is None:
+            return None
+
+        # Skip stale data - don't evaluate on prices older than 2 minutes
+        max_staleness_seconds = 120
+        bar_age = (datetime.now(bar.timestamp.tzinfo) - bar.timestamp).total_seconds()
+        if bar_age > max_staleness_seconds:
             return None
 
         # Calculate OHLC from daily bars if available
