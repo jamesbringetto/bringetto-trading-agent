@@ -68,7 +68,7 @@ export function MarketStatusWidget() {
     dataUpdatedAt,
   } = useQuery({
     queryKey: ['marketStatus'],
-    queryFn: api.getMarketStatus,
+    queryFn: () => api.getMarketStatus(),
     refetchInterval: 30000, // Refresh every 30 seconds
     staleTime: 10000, // Consider data stale after 10 seconds
   });

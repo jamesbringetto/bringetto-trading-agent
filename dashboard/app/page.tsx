@@ -23,17 +23,17 @@ export default function Dashboard() {
 
   const { data: portfolio, isLoading: portfolioLoading } = useQuery({
     queryKey: ['portfolio'],
-    queryFn: api.getPortfolioSummary,
+    queryFn: () => api.getPortfolioSummary(),
   });
 
   const { data: strategies, isLoading: strategiesLoading } = useQuery({
     queryKey: ['strategies'],
-    queryFn: api.getStrategies,
+    queryFn: () => api.getStrategies(),
   });
 
   const { data: status } = useQuery({
     queryKey: ['status'],
-    queryFn: api.getTradingStatus,
+    queryFn: () => api.getTradingStatus(),
   });
 
   const isLoading = portfolioLoading || strategiesLoading;
