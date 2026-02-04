@@ -754,6 +754,239 @@ class AlpacaBroker:
         except Exception as e:
             return self._handle_api_error(e, symbol, f"bracket {side.value}")
 
+    def submit_oco_order(
+        self,
+        symbol: str,
+        side: OrderSide,
+        qty: Decimal,
+        take_profit_price: Decimal,
+        stop_loss_price: Decimal,
+        stop_loss_limit_price: Decimal | None = None,
+    ) -> OrderResult:
+        """
+        Submit an OCO (One-Cancels-Other) order.
+
+        Per Alpaca docs: OCO is used to set both take-profit and stop-loss
+        after you already have an open position. Unlike bracket orders,
+        there is no entry order - both orders are submitted immediately.
+
+        Args:
+            symbol: Stock symbol
+            side: SELL for long positions, BUY for short positions
+            qty: Number of shares
+            take_profit_price: Limit price for take profit order
+            stop_loss_price: Stop price for stop loss order
+            stop_loss_limit_price: Optional limit price for stop loss (creates stop-limit)
+
+        Note: Take profit is a limit order, stop loss can be stop or stop-limit.
+        """
+        try:
+            # Build take profit leg
+            take_profit = TakeProfitRequest(limit_price=float(take_profit_price))
+
+            # Build stop loss leg
+            if stop_loss_limit_price:
+                stop_loss = StopLossRequest(
+                    stop_price=float(stop_loss_price),
+                    limit_price=float(stop_loss_limit_price),
+                )
+            else:
+                stop_loss = StopLossRequest(stop_price=float(stop_loss_price))
+
+            # OCO uses limit order type with order_class="oco"
+            order_data = LimitOrderRequest(
+                symbol=symbol,
+                side=self._convert_order_side(side),
+                qty=float(qty),
+                limit_price=float(take_profit_price),  # Take profit price as limit
+                time_in_force=TimeInForce.GTC,
+                order_class="oco",
+                take_profit=take_profit,
+                stop_loss=stop_loss,
+            )
+
+            order = self._retry_with_backoff(
+                self._trading_client.submit_order,
+                order_data
+            )
+
+            logger.info(
+                f"OCO order submitted: {side.value} {qty} {symbol} "
+                f"TP=${take_profit_price} SL=${stop_loss_price} - Order ID: {order.id}"
+            )
+
+            return OrderResult(
+                success=True,
+                order_id=str(order.id),
+                filled_price=None,
+                filled_qty=None,
+                status=self._convert_order_status(order.status),
+                message="OCO order submitted successfully",
+                raw_response=order.__dict__,
+            )
+
+        except Exception as e:
+            return self._handle_api_error(e, symbol, f"oco {side.value}")
+
+    def submit_oto_order(
+        self,
+        symbol: str,
+        side: OrderSide,
+        qty: Decimal,
+        stop_loss_price: Decimal | None = None,
+        take_profit_price: Decimal | None = None,
+        stop_loss_limit_price: Decimal | None = None,
+        entry_type: str = "market",
+        limit_price: Decimal | None = None,
+    ) -> OrderResult:
+        """
+        Submit an OTO (One-Triggers-Other) order.
+
+        Per Alpaca docs: OTO is like bracket but with only ONE exit order
+        (either take-profit OR stop-loss, not both).
+
+        Args:
+            symbol: Stock symbol
+            side: Buy or sell for entry
+            qty: Number of shares
+            stop_loss_price: Stop price for stop loss (provide this OR take_profit_price)
+            take_profit_price: Limit price for take profit (provide this OR stop_loss_price)
+            stop_loss_limit_price: Optional limit price for stop loss
+            entry_type: "market" or "limit" for entry order
+            limit_price: Required if entry_type is "limit"
+
+        Raises:
+            ValueError: If neither or both stop_loss_price and take_profit_price provided
+        """
+        # Validate - must have exactly one of stop_loss or take_profit
+        has_stop = stop_loss_price is not None
+        has_profit = take_profit_price is not None
+        if has_stop == has_profit:
+            raise ValueError("Must specify exactly one of stop_loss_price or take_profit_price for OTO")
+
+        try:
+            # Build the single exit leg
+            take_profit = None
+            stop_loss = None
+
+            if take_profit_price:
+                take_profit = TakeProfitRequest(limit_price=float(take_profit_price))
+            elif stop_loss_price:
+                if stop_loss_limit_price:
+                    stop_loss = StopLossRequest(
+                        stop_price=float(stop_loss_price),
+                        limit_price=float(stop_loss_limit_price),
+                    )
+                else:
+                    stop_loss = StopLossRequest(stop_price=float(stop_loss_price))
+
+            # Build the appropriate entry order
+            if entry_type == "limit":
+                if limit_price is None:
+                    raise ValueError("limit_price required for limit entry orders")
+                order_data = LimitOrderRequest(
+                    symbol=symbol,
+                    side=self._convert_order_side(side),
+                    qty=float(qty),
+                    limit_price=float(limit_price),
+                    time_in_force=TimeInForce.GTC,
+                    order_class="oto",
+                    take_profit=take_profit,
+                    stop_loss=stop_loss,
+                )
+            else:
+                order_data = MarketOrderRequest(
+                    symbol=symbol,
+                    side=self._convert_order_side(side),
+                    qty=float(qty),
+                    time_in_force=TimeInForce.GTC,
+                    order_class="oto",
+                    take_profit=take_profit,
+                    stop_loss=stop_loss,
+                )
+
+            order = self._retry_with_backoff(
+                self._trading_client.submit_order,
+                order_data
+            )
+
+            exit_info = f"TP=${take_profit_price}" if take_profit_price else f"SL=${stop_loss_price}"
+            logger.info(
+                f"OTO order submitted: {side.value} {qty} {symbol} "
+                f"{exit_info} - Order ID: {order.id}"
+            )
+
+            return OrderResult(
+                success=True,
+                order_id=str(order.id),
+                filled_price=Decimal(str(order.filled_avg_price)) if order.filled_avg_price else None,
+                filled_qty=Decimal(str(order.filled_qty)) if order.filled_qty else None,
+                status=self._convert_order_status(order.status),
+                message="OTO order submitted successfully",
+                raw_response=order.__dict__,
+            )
+
+        except Exception as e:
+            return self._handle_api_error(e, symbol, f"oto {side.value}")
+
+    def validate_asset_for_trading(
+        self,
+        symbol: str,
+        qty: Decimal | None = None,
+        notional: Decimal | None = None,
+        short_sell: bool = False,
+    ) -> tuple[bool, str]:
+        """
+        Validate that an asset can be traded before submitting an order.
+
+        Per Alpaca docs, checks:
+        - Asset exists and is active
+        - Asset is tradable
+        - Asset is fractionable (if fractional qty)
+        - Asset is shortable (if short selling)
+        - Asset is easy to borrow (if short selling, we only support ETB)
+
+        Args:
+            symbol: Stock symbol to validate
+            qty: Order quantity (to check fractionable)
+            notional: Notional value (to check fractionable)
+            short_sell: Whether this is a short sell order
+
+        Returns:
+            Tuple of (is_valid, reason_if_invalid)
+        """
+        asset_info = self.get_asset_info(symbol)
+
+        if not asset_info:
+            return False, f"Asset {symbol} not found"
+
+        # Check if active
+        if asset_info.get("status") != "active":
+            return False, f"Asset {symbol} is not active (status: {asset_info.get('status')})"
+
+        # Check if tradable
+        if not asset_info.get("tradable"):
+            return False, f"Asset {symbol} is not tradable"
+
+        # Check fractionable for fractional orders
+        is_fractional = False
+        if qty is not None:
+            is_fractional = qty != int(qty)
+        elif notional is not None:
+            is_fractional = True  # Notional orders are always fractional
+
+        if is_fractional and not asset_info.get("fractionable"):
+            return False, f"Asset {symbol} does not support fractional trading"
+
+        # Check short selling requirements
+        if short_sell:
+            if not asset_info.get("shortable"):
+                return False, f"Asset {symbol} is not shortable"
+            if not asset_info.get("easy_to_borrow"):
+                return False, f"Asset {symbol} is hard to borrow (we only support ETB)"
+
+        return True, "Asset is valid for trading"
+
     def cancel_order(self, order_id: str) -> bool:
         """Cancel an open order."""
         try:
