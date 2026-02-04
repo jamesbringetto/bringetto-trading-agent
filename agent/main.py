@@ -289,12 +289,21 @@ class TradingAgent:
         await self._data_streamer.subscribe_bars(symbols)
         await self._data_streamer.subscribe_quotes(symbols)
 
-        # Start streaming in background task
+        # Start streaming in background task with error handling
         self._data_streaming_task = asyncio.create_task(
-            self._data_streamer.start(auto_reconnect=True)
+            self._run_data_streaming(),
+            name="data_streaming"
         )
 
         logger.info(f"Market data streaming started for {len(symbols)} symbols")
+
+    async def _run_data_streaming(self) -> None:
+        """Run data streaming with error logging."""
+        try:
+            await self._data_streamer.start(auto_reconnect=True)
+        except Exception as e:
+            logger.error(f"Data streaming task failed: {e}")
+            raise
 
     def _on_data_stream_disconnect(self, error: str) -> None:
         """Handle market data stream disconnection."""

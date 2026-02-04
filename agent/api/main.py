@@ -1,5 +1,7 @@
 """FastAPI application for the trading agent dashboard API."""
 
+import asyncio
+import contextlib
 from contextlib import asynccontextmanager
 from datetime import datetime
 
@@ -37,12 +39,43 @@ class HealthResponse(BaseModel):
 __all__ = ["app", "create_app", "get_agent_state", "set_agent_state"]
 
 
+# Global reference to agent task for shutdown
+_agent_task: asyncio.Task | None = None
+_agent_instance = None
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Application lifespan handler."""
+    """Application lifespan handler - starts trading agent as background task."""
+    global _agent_task, _agent_instance
+
     logger.info("Starting Trading Agent API...")
+
+    # Import here to avoid circular imports
+    from agent.main import TradingAgent
+
+    # Create and start the trading agent as a background task
+    logger.info("Initializing trading agent in API process...")
+    _agent_instance = TradingAgent()
+
+    _agent_task = asyncio.create_task(
+        _agent_instance.run(),
+        name="trading_agent"
+    )
+
+    logger.info("Trading agent started as background task")
+
     yield
+
+    # Shutdown
     logger.info("Shutting down Trading Agent API...")
+    if _agent_instance:
+        await _agent_instance.shutdown()
+    if _agent_task and not _agent_task.done():
+        _agent_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await _agent_task
+    logger.info("Trading agent shutdown complete")
 
 
 def create_app() -> FastAPI:
