@@ -12,7 +12,7 @@ import {
   Database,
   RefreshCw,
 } from 'lucide-react';
-import { useTimezoneStore, formatTimeInTimezone, TIMEZONE_OPTIONS } from '@/lib/timezone-store';
+import { useTimezoneStore, TIMEZONE_OPTIONS } from '@/lib/timezone-store';
 
 export default function InstrumentationPage() {
   const { data: status, isLoading, refetch, dataUpdatedAt } = useQuery({
@@ -113,16 +113,36 @@ function LastUpdatedFooter({ timestamp }: { timestamp: number }) {
   const { timezone } = useTimezoneStore();
   const tzOption = TIMEZONE_OPTIONS.find((tz) => tz.value === timezone);
 
+  const formattedTime = new Intl.DateTimeFormat('en-US', {
+    timeZone: timezone,
+    hour: 'numeric',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: true,
+  }).format(new Date(timestamp));
+
   return (
     <p className="text-xs text-muted-foreground text-right">
-      Last updated: {formatTimeInTimezone(new Date(timestamp))} {tzOption?.abbrev}
+      Last updated: {formattedTime} {tzOption?.abbrev}
     </p>
   );
 }
 
 function DataReceptionCard({ stats }: { stats: DataReceptionStats }) {
+  const { timezone } = useTimezoneStore();
   const isReceivingData = stats.total_bars > 0 || stats.total_quotes > 0 || stats.total_trades > 0;
   const isFresh = stats.data_freshness_seconds !== null && stats.data_freshness_seconds < 60;
+
+  const formatTime = (isoString: string) => {
+    const date = new Date(isoString);
+    return new Intl.DateTimeFormat('en-US', {
+      timeZone: timezone,
+      hour: 'numeric',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: true,
+    }).format(date);
+  };
 
   return (
     <div className="rounded-lg border bg-card p-6">
@@ -188,12 +208,12 @@ function DataReceptionCard({ stats }: { stats: DataReceptionStats }) {
           label="Data Window"
           value={
             stats.first_data_time
-              ? formatTimeInTimezone(stats.first_data_time)
+              ? formatTime(stats.first_data_time)
               : 'N/A'
           }
           subValue={
             stats.last_data_time
-              ? formatTimeInTimezone(stats.last_data_time)
+              ? formatTime(stats.last_data_time)
               : 'N/A'
           }
           subLabel="First / Last"
@@ -274,6 +294,19 @@ function EvaluationSummaryCard({ summary }: { summary: EvaluationSummary }) {
 }
 
 function EvaluationsList({ evaluations }: { evaluations: StrategyEvaluation[] }) {
+  const { timezone } = useTimezoneStore();
+
+  const formatTime = (timestamp: string) => {
+    const date = new Date(timestamp);
+    return new Intl.DateTimeFormat('en-US', {
+      timeZone: timezone,
+      hour: 'numeric',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: true,
+    }).format(date);
+  };
+
   return (
     <div className="rounded-lg border bg-card overflow-hidden">
       <div className="max-h-96 overflow-y-auto">
@@ -292,7 +325,7 @@ function EvaluationsList({ evaluations }: { evaluations: StrategyEvaluation[] })
             {evaluations.map((evaluation) => (
               <tr key={evaluation.id} className="hover:bg-muted/30">
                 <td className="px-4 py-2 text-muted-foreground">
-                  {formatTimeInTimezone(evaluation.timestamp)}
+                  {formatTime(evaluation.timestamp)}
                 </td>
                 <td className="px-4 py-2 font-medium">
                   {evaluation.strategy_name}
