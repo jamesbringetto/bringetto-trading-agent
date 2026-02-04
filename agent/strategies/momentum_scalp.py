@@ -40,6 +40,7 @@ class MomentumScalp(BaseStrategy):
         "stop_loss_pct": TradingConstants.MOMENTUM_STOP_LOSS_PCT,
         "position_size_pct": TradingConstants.MOMENTUM_POSITION_SIZE_PCT,
         "max_positions": TradingConstants.MOMENTUM_MAX_POSITIONS,
+        "allowed_symbols": list(TradingConstants.TIER_1_ASSETS + TradingConstants.TIER_2_ASSETS),
         "min_volume": 5_000_000,
         "min_price": 10.0,
     }

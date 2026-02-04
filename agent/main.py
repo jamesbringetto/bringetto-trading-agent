@@ -194,10 +194,23 @@ class TradingAgent:
         logger.info(f"Initialized {len(self._strategies)} strategies")
 
     def _get_trading_symbols(self) -> list[str]:
-        """Get all symbols that strategies want to trade."""
-        # Combine TIER_1 and TIER_2 assets
-        symbols = set(TradingConstants.TIER_1_ASSETS + TradingConstants.TIER_2_ASSETS)
-        logger.info(f"Trading symbols: {sorted(symbols)}")
+        """
+        Get all symbols that strategies want to trade.
+
+        Dynamically collects symbols from each strategy's allowed_symbols parameter.
+        Falls back to TIER_1 + TIER_2 assets if no strategies define symbols.
+        """
+        symbols: set[str] = set()
+
+        for strategy in self._strategies:
+            allowed = strategy.parameters.get("allowed_symbols", [])
+            symbols.update(allowed)
+
+        # Fallback if no strategies define symbols
+        if not symbols:
+            symbols = set(TradingConstants.TIER_1_ASSETS + TradingConstants.TIER_2_ASSETS)
+
+        logger.info(f"Trading symbols from {len(self._strategies)} strategies: {sorted(symbols)}")
         return list(symbols)
 
     def _on_bar_data(self, bar: BarData) -> None:
@@ -352,24 +365,13 @@ class TradingAgent:
             logger.debug(f"Evaluated {evaluated_count} strategy/symbol combinations")
 
     def _is_symbol_for_strategy(self, symbol: str, strategy) -> bool:
-        """Check if a symbol is relevant for a given strategy."""
-        tier_1 = TradingConstants.TIER_1_ASSETS
-        tier_2 = TradingConstants.TIER_2_ASSETS
+        """
+        Check if a symbol is relevant for a given strategy.
 
-        strategy_name = strategy.name.lower()
-
-        # ORB and EOD Reversal trade TIER_1 (SPY, QQQ, IWM)
-        if "orb" in strategy_name or "opening range" in strategy_name:
-            return symbol in tier_1
-        if "eod" in strategy_name or "reversal" in strategy_name:
-            return symbol in tier_1
-
-        # VWAP Reversion trades TIER_2
-        if "vwap" in strategy_name:
-            return symbol in tier_2
-
-        # Momentum and Gap strategies can trade both tiers
-        return symbol in tier_1 or symbol in tier_2
+        Uses the strategy's allowed_symbols parameter for consistent behavior.
+        """
+        allowed_symbols = strategy.parameters.get("allowed_symbols", [])
+        return symbol in allowed_symbols
 
     def _on_circuit_breaker_trigger(self, reason: str) -> None:
         """Callback when circuit breaker is triggered."""
