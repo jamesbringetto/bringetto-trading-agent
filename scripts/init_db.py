@@ -69,7 +69,7 @@ def seed_strategies():
     strategies = [
         {
             "name": "Opening Range Breakout",
-            "type": StrategyType.ORB,
+            "type": StrategyType.ORB.value,
             "parameters": {
                 "range_minutes": 30,
                 "breakout_threshold": 0.002,
@@ -83,7 +83,7 @@ def seed_strategies():
         },
         {
             "name": "VWAP Mean Reversion",
-            "type": StrategyType.VWAP_REVERSION,
+            "type": StrategyType.VWAP_REVERSION.value,
             "parameters": {
                 "deviation_threshold": 2.0,
                 "stop_loss_pct": 0.5,
@@ -96,7 +96,7 @@ def seed_strategies():
         },
         {
             "name": "Momentum Scalp",
-            "type": StrategyType.MOMENTUM_SCALP,
+            "type": StrategyType.MOMENTUM_SCALP.value,
             "parameters": {
                 "momentum_threshold": 0.01,
                 "volume_multiplier": 2.0,
@@ -110,7 +110,7 @@ def seed_strategies():
         },
         {
             "name": "Gap and Go",
-            "type": StrategyType.GAP_AND_GO,
+            "type": StrategyType.GAP_AND_GO.value,
             "parameters": {
                 "min_gap_pct": 3.0,
                 "volume_threshold": 1000000,
@@ -124,7 +124,7 @@ def seed_strategies():
         },
         {
             "name": "EOD Reversal",
-            "type": StrategyType.EOD_REVERSAL,
+            "type": StrategyType.EOD_REVERSAL.value,
             "parameters": {
                 "reversal_threshold": 0.015,
                 "entry_time": "15:00",
