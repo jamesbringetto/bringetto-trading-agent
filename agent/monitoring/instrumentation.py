@@ -120,6 +120,15 @@ class Instrumentation:
         self._last_heartbeat: datetime | None = None
         self._heartbeat_task: asyncio.Task | None = None
 
+        # Cumulative counters (not capped like the evaluations list)
+        self._total_evaluations: int = 0
+        self._total_accepted: int = 0
+        self._total_rejected: int = 0
+        self._total_skipped: int = 0
+        self._by_strategy_cumulative: dict[str, dict[str, int]] = defaultdict(
+            lambda: {"total": 0, "accepted": 0, "rejected": 0}
+        )
+
         logger.info(
             f"Instrumentation initialized - "
             f"heartbeat every {heartbeat_interval_seconds}s, "
@@ -278,10 +287,22 @@ class Instrumentation:
             evaluation.stop_loss = signal.get("stop_loss")
             evaluation.take_profit = signal.get("take_profit")
 
-        # Store in memory (with limit)
+        # Store in memory (with limit for recent evaluations display)
         self._evaluations.append(evaluation)
         if len(self._evaluations) > self._max_evaluations:
             self._evaluations = self._evaluations[-self._max_evaluations:]
+
+        # Update cumulative counters (unlimited)
+        self._total_evaluations += 1
+        self._by_strategy_cumulative[strategy_name]["total"] += 1
+        if decision == "accepted":
+            self._total_accepted += 1
+            self._by_strategy_cumulative[strategy_name]["accepted"] += 1
+        elif decision == "rejected":
+            self._total_rejected += 1
+            self._by_strategy_cumulative[strategy_name]["rejected"] += 1
+        elif decision == "skipped":
+            self._total_skipped += 1
 
         # Log based on decision type
         if decision == "accepted":
@@ -339,41 +360,39 @@ class Instrumentation:
 
     def get_evaluation_summary(self, minutes: int = 60) -> dict[str, Any]:
         """
-        Get summary of evaluations in the last N minutes.
+        Get summary of evaluations.
+
+        Uses cumulative counters for total counts (unlimited), and recent
+        evaluations list for time-windowed metrics like acceptance rate.
 
         Args:
-            minutes: Time window in minutes
+            minutes: Time window in minutes (for acceptance rate calculation)
 
         Returns:
-            Summary statistics
+            Summary statistics with cumulative totals
         """
+        # Calculate acceptance rate from recent evaluations within time window
         cutoff = datetime.utcnow() - timedelta(minutes=minutes)
         recent = [e for e in self._evaluations if e.timestamp >= cutoff]
 
-        by_strategy: dict[str, dict[str, int]] = defaultdict(lambda: {"total": 0, "accepted": 0, "rejected": 0})
         by_symbol: dict[str, int] = defaultdict(int)
-
         for e in recent:
-            by_strategy[e.strategy_name]["total"] += 1
-            if e.decision == "accepted":
-                by_strategy[e.strategy_name]["accepted"] += 1
-            elif e.decision == "rejected":
-                by_strategy[e.strategy_name]["rejected"] += 1
             by_symbol[e.symbol] += 1
 
-        total_accepted = sum(1 for e in recent if e.decision == "accepted")
-        total_rejected = sum(1 for e in recent if e.decision == "rejected")
-        total_skipped = sum(1 for e in recent if e.decision == "skipped")
-        total = len(recent)
+        recent_accepted = sum(1 for e in recent if e.decision == "accepted")
+        recent_total = len(recent)
 
         return {
             "time_window_minutes": minutes,
-            "total_evaluations": total,
-            "accepted": total_accepted,
-            "rejected": total_rejected,
-            "skipped": total_skipped,
-            "acceptance_rate": round(total_accepted / total, 4) if total > 0 else 0,
-            "by_strategy": dict(by_strategy),
+            # Use cumulative counters for totals (unlimited)
+            "total_evaluations": self._total_evaluations,
+            "accepted": self._total_accepted,
+            "rejected": self._total_rejected,
+            "skipped": self._total_skipped,
+            # Acceptance rate based on recent window
+            "acceptance_rate": round(recent_accepted / recent_total, 4) if recent_total > 0 else 0,
+            # Use cumulative strategy counters
+            "by_strategy": {k: dict(v) for k, v in self._by_strategy_cumulative.items()},
             "by_symbol": dict(by_symbol),
         }
 
