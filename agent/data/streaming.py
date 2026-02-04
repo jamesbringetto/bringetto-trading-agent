@@ -21,6 +21,7 @@ from alpaca.data.models import Bar, Quote, Trade
 from loguru import logger
 
 from agent.config.settings import get_settings
+from agent.monitoring.instrumentation import get_instrumentation
 
 # Reconnection configuration
 MAX_RECONNECT_ATTEMPTS = 10
@@ -136,6 +137,9 @@ class DataStreamer:
         """Handle incoming bar data."""
         self._last_data_time = datetime.now()
 
+        # Record data reception for instrumentation
+        get_instrumentation().record_bar(bar.symbol)
+
         bar_data = BarData(
             symbol=bar.symbol,
             timestamp=bar.timestamp,
@@ -157,6 +161,9 @@ class DataStreamer:
         """Handle incoming quote data."""
         self._last_data_time = datetime.now()
 
+        # Record data reception for instrumentation
+        get_instrumentation().record_quote(quote.symbol)
+
         quote_data = QuoteData(
             symbol=quote.symbol,
             timestamp=quote.timestamp,
@@ -175,6 +182,9 @@ class DataStreamer:
     async def _handle_trade(self, trade: Trade) -> None:
         """Handle incoming trade data."""
         self._last_data_time = datetime.now()
+
+        # Record data reception for instrumentation
+        get_instrumentation().record_trade_tick(trade.symbol)
 
         trade_data = TradeData(
             symbol=trade.symbol,

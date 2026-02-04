@@ -8,7 +8,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 from pydantic import BaseModel
 
-from agent.api.routes import analytics, controls, market, performance, strategies, trades
+from agent.api.routes import (
+    analytics,
+    controls,
+    instrumentation,
+    market,
+    performance,
+    strategies,
+    trades,
+)
 from agent.api.state import get_agent_state, set_agent_state
 from agent.config.settings import get_settings
 
@@ -64,6 +72,9 @@ def create_app() -> FastAPI:
     app.include_router(controls.router, prefix="/api/controls", tags=["controls"])
     app.include_router(analytics.router, prefix="/api/analytics", tags=["analytics"])
     app.include_router(market.router, prefix="/api/market", tags=["market"])
+    app.include_router(
+        instrumentation.router, prefix="/api/instrumentation", tags=["instrumentation"]
+    )
 
     @app.get("/", tags=["root"])
     async def root():
@@ -94,6 +105,7 @@ def create_app() -> FastAPI:
             from sqlalchemy import text
 
             from agent.database import get_session
+
             with get_session() as session:
                 session.execute(text("SELECT 1"))
         except Exception as e:

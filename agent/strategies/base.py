@@ -10,6 +10,7 @@ from uuid import UUID
 from loguru import logger
 
 from agent.config.constants import OrderSide, StrategyType
+from agent.monitoring.instrumentation import get_instrumentation
 
 
 @dataclass
@@ -259,6 +260,138 @@ class BaseStrategy(ABC):
         """Re-enable the strategy."""
         self.is_active = True
         logger.info(f"Strategy {self.name} enabled")
+
+    def evaluate_entry(self, context: MarketContext) -> StrategySignal | None:
+        """
+        Evaluate entry conditions and record the decision via instrumentation.
+
+        This is a wrapper around should_enter() that also logs the evaluation
+        for observability purposes. Use this method in the main trading loop
+        instead of calling should_enter() directly.
+
+        Args:
+            context: Current market context
+
+        Returns:
+            StrategySignal if entry conditions met, None otherwise
+        """
+        inst = get_instrumentation()
+
+        # First validate basic conditions
+        is_valid, rejection_reason = self.validate_entry(context)
+        if not is_valid:
+            inst.record_evaluation(
+                strategy_name=self.name,
+                symbol=context.symbol,
+                evaluation_type="entry",
+                decision="rejected",
+                context={
+                    "current_price": context.current_price,
+                    "volume": context.volume,
+                    "vwap": context.vwap,
+                    "rsi": context.rsi,
+                    "macd": context.macd,
+                    "atr": context.atr,
+                    "vix": context.vix,
+                    "bid": context.bid,
+                    "ask": context.ask,
+                },
+                rejection_reason=rejection_reason,
+            )
+            return None
+
+        # Run strategy-specific evaluation
+        signal = self.should_enter(context)
+
+        if signal is None:
+            inst.record_evaluation(
+                strategy_name=self.name,
+                symbol=context.symbol,
+                evaluation_type="entry",
+                decision="rejected",
+                context={
+                    "current_price": context.current_price,
+                    "volume": context.volume,
+                    "vwap": context.vwap,
+                    "rsi": context.rsi,
+                    "macd": context.macd,
+                    "atr": context.atr,
+                    "vix": context.vix,
+                    "bid": context.bid,
+                    "ask": context.ask,
+                },
+                rejection_reason="No signal generated",
+            )
+        else:
+            inst.record_evaluation(
+                strategy_name=self.name,
+                symbol=context.symbol,
+                evaluation_type="entry",
+                decision="accepted",
+                context={
+                    "current_price": context.current_price,
+                    "volume": context.volume,
+                    "vwap": context.vwap,
+                    "rsi": context.rsi,
+                    "macd": context.macd,
+                    "atr": context.atr,
+                    "vix": context.vix,
+                    "bid": context.bid,
+                    "ask": context.ask,
+                },
+                signal={
+                    "side": signal.side.value,
+                    "confidence": signal.confidence,
+                    "reasoning": signal.reasoning,
+                    "entry_price": signal.entry_price,
+                    "stop_loss": signal.stop_loss,
+                    "take_profit": signal.take_profit,
+                },
+            )
+
+        return signal
+
+    def evaluate_exit(
+        self, context: MarketContext, entry_price: Decimal, side: OrderSide
+    ) -> tuple[bool, str]:
+        """
+        Evaluate exit conditions and record the decision via instrumentation.
+
+        This is a wrapper around should_exit() that also logs the evaluation
+        for observability purposes.
+
+        Args:
+            context: Current market context
+            entry_price: Original entry price
+            side: Original trade side
+
+        Returns:
+            Tuple of (should_exit, reason)
+        """
+        should_exit, reason = self.should_exit(context, entry_price, side)
+
+        inst = get_instrumentation()
+        inst.record_evaluation(
+            strategy_name=self.name,
+            symbol=context.symbol,
+            evaluation_type="exit",
+            decision="accepted" if should_exit else "rejected",
+            context={
+                "current_price": context.current_price,
+                "volume": context.volume,
+                "vwap": context.vwap,
+                "rsi": context.rsi,
+                "macd": context.macd,
+                "atr": context.atr,
+                "vix": context.vix,
+                "bid": context.bid,
+                "ask": context.ask,
+            },
+            rejection_reason=None if should_exit else reason,
+            signal={"side": side.value, "reasoning": reason} if should_exit else None,
+        )
+
+        return should_exit, reason
 
     def __repr__(self) -> str:
         return f"<{self.__class__.__name__}(name={self.name}, active={self.is_active})>"
