@@ -1,6 +1,7 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
+import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
 import { formatCurrency, formatPercent } from '@/lib/utils';
 import { StrategyPerformanceChart } from '@/components/charts/strategy-performance';
@@ -13,9 +14,12 @@ import {
   Activity,
   BarChart3,
   Clock,
+  LogOut,
 } from 'lucide-react';
 
 export default function Dashboard() {
+  const router = useRouter();
+
   const { data: portfolio, isLoading: portfolioLoading } = useQuery({
     queryKey: ['portfolio'],
     queryFn: api.getPortfolioSummary,
@@ -33,6 +37,12 @@ export default function Dashboard() {
 
   const isLoading = portfolioLoading || strategiesLoading;
 
+  const handleLogout = async () => {
+    await fetch('/api/auth/logout', { method: 'POST' });
+    router.push('/login');
+    router.refresh();
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -43,15 +53,24 @@ export default function Dashboard() {
             Real-time trading performance overview
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <div
-            className={`h-3 w-3 rounded-full ${
-              status?.is_running ? 'bg-green-500' : 'bg-red-500'
-            }`}
-          />
-          <span className="text-sm text-muted-foreground">
-            {status?.is_running ? 'Trading Active' : 'Trading Paused'}
-          </span>
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2">
+            <div
+              className={`h-3 w-3 rounded-full ${
+                status?.is_running ? 'bg-green-500' : 'bg-red-500'
+              }`}
+            />
+            <span className="text-sm text-muted-foreground">
+              {status?.is_running ? 'Trading Active' : 'Trading Paused'}
+            </span>
+          </div>
+          <button
+            onClick={handleLogout}
+            className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <LogOut className="h-4 w-4" />
+            Logout
+          </button>
         </div>
       </div>
 
