@@ -12,11 +12,11 @@ WebSocket Streaming:
 """
 
 import asyncio
+import contextlib
 import signal
 import sys
 from collections import defaultdict
 from datetime import datetime, timedelta
-from decimal import Decimal
 
 import pytz
 from dateutil import parser as date_parser
@@ -311,10 +311,8 @@ class TradingAgent:
 
         if self._data_streaming_task and not self._data_streaming_task.done():
             self._data_streaming_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await self._data_streaming_task
-            except asyncio.CancelledError:
-                pass
 
         logger.info("Market data streaming stopped")
 
@@ -406,10 +404,7 @@ class TradingAgent:
             return True
 
         # Sunday before 8 PM ET
-        if weekday == WEEKEND_OPEN_DAY and hour < WEEKEND_OPEN_HOUR:
-            return True
-
-        return False
+        return weekday == WEEKEND_OPEN_DAY and hour < WEEKEND_OPEN_HOUR
 
     def _get_seconds_until_24_5_open(self) -> float:
         """
@@ -659,10 +654,8 @@ class TradingAgent:
             # Cancel streaming task
             if self._streaming_task and not self._streaming_task.done():
                 self._streaming_task.cancel()
-                try:
+                with contextlib.suppress(asyncio.CancelledError):
                     await self._streaming_task
-                except asyncio.CancelledError:
-                    pass
 
             logger.info("WebSocket streaming stopped")
         except Exception as e:
