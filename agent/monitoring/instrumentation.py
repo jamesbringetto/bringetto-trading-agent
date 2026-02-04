@@ -70,7 +70,7 @@ class StrategyEvaluation:
         """Convert to dictionary for logging/storage."""
         return {
             "id": str(self.id),
-            "timestamp": self.timestamp.isoformat(),
+            "timestamp": self.timestamp.isoformat() + "Z",  # Append Z to indicate UTC
             "strategy_name": self.strategy_name,
             "symbol": self.symbol,
             "evaluation_type": self.evaluation_type,
@@ -180,8 +180,8 @@ class Instrumentation:
             "unique_symbols_bars": len(stats.bars_per_symbol),
             "unique_symbols_quotes": len(stats.quotes_per_symbol),
             "unique_symbols_trades": 0,  # Not tracked per symbol currently
-            "first_data_time": first_data_time.isoformat() if first_data_time else None,
-            "last_data_time": last_data_time.isoformat() if last_data_time else None,
+            "first_data_time": first_data_time.isoformat() + "Z" if first_data_time else None,
+            "last_data_time": last_data_time.isoformat() + "Z" if last_data_time else None,
             "data_freshness_seconds": round(data_freshness, 1) if data_freshness else None,
             "bars_per_second": round(bars_per_second, 2),
             "quotes_per_second": round(quotes_per_second, 2),
