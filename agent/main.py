@@ -5,6 +5,10 @@
 - Trading sessions: Overnight (8PM-4AM), Pre-market (4AM-9:30AM),
   Regular (9:30AM-4PM), After-hours (4PM-8PM)
 - Weekend closure: Friday 8 PM ET through Sunday 8 PM ET
+
+WebSocket Streaming:
+- Trade updates via Alpaca's WebSocket for real-time order fills
+- Market data streaming for real-time quotes and bars
 """
 
 import asyncio
@@ -19,7 +23,8 @@ from loguru import logger
 from agent.api.state import set_agent_state
 from agent.config.constants import TradingSession
 from agent.config.settings import get_settings
-from agent.execution.broker import AlpacaBroker
+from agent.data.streaming import DataStreamer
+from agent.execution.broker import AlpacaBroker, OrderUpdateHandler
 from agent.monitoring.logger import setup_logging
 from agent.monitoring.metrics import MetricsCollector
 from agent.risk.circuit_breaker import CircuitBreaker
@@ -65,6 +70,14 @@ class TradingAgent:
         self._validator = TradeValidator()
         self._metrics = MetricsCollector()
 
+        # WebSocket streaming handlers
+        self._order_handler = OrderUpdateHandler()
+        self._data_streamer: DataStreamer | None = None
+        self._streaming_task: asyncio.Task | None = None
+
+        # Register order update callbacks
+        self._setup_order_callbacks()
+
         # Strategies
         self._strategies = []
         self._init_strategies()
@@ -77,12 +90,72 @@ class TradingAgent:
         set_agent_state("broker", self._broker)
         set_agent_state("circuit_breaker", self._circuit_breaker)
         set_agent_state("strategies", self._strategies)
+        set_agent_state("order_handler", self._order_handler)
 
         logger.info(
             f"TradingAgent initialized - "
             f"Environment: {self._settings.environment}, "
             f"Capital: ${self._settings.paper_trading_capital:,.2f}"
         )
+
+    def _setup_order_callbacks(self) -> None:
+        """Set up callbacks for WebSocket trade updates."""
+        # Log all fills for tracking
+        self._order_handler.on_fill(self._on_order_fill)
+        self._order_handler.on_partial_fill(self._on_partial_fill)
+        self._order_handler.on_reject(self._on_order_reject)
+        self._order_handler.on_cancel(self._on_order_cancel)
+
+        # Track any event for metrics
+        self._order_handler.on_any_event(self._on_any_trade_event)
+
+        # Connection monitoring
+        self._order_handler.on_disconnect(self._on_stream_disconnect)
+        self._order_handler.on_reconnect(self._on_stream_reconnect)
+
+        logger.info("Order update callbacks registered")
+
+    def _on_order_fill(self, update: dict) -> None:
+        """Handle order fill events from WebSocket."""
+        logger.info(
+            f"[FILL] {update['symbol']} - "
+            f"Qty: {update.get('filled_qty')} @ ${update.get('filled_avg_price')}"
+        )
+        # Update metrics
+        self._metrics.record_fill(update)
+
+    def _on_partial_fill(self, update: dict) -> None:
+        """Handle partial fill events from WebSocket."""
+        logger.info(
+            f"[PARTIAL FILL] {update['symbol']} - "
+            f"Filled: {update.get('filled_qty')}/{update.get('qty')}"
+        )
+
+    def _on_order_reject(self, update: dict) -> None:
+        """Handle order rejection events from WebSocket."""
+        logger.error(
+            f"[REJECTED] {update['symbol']} - Order {update['order_id']} - "
+            f"Status: {update.get('status')}"
+        )
+        # Record rejection for analysis
+        self._metrics.record_rejection(update)
+
+    def _on_order_cancel(self, update: dict) -> None:
+        """Handle order cancellation events from WebSocket."""
+        logger.info(f"[CANCELED] {update['symbol']} - Order {update['order_id']}")
+
+    def _on_any_trade_event(self, event: str, update: dict) -> None:
+        """Handle any trade event for metrics tracking."""
+        self._metrics.record_trade_event(event, update)
+
+    def _on_stream_disconnect(self, error: str) -> None:
+        """Handle WebSocket disconnection."""
+        logger.warning(f"Trade update stream disconnected: {error}")
+        # TODO: Send alert notification
+
+    def _on_stream_reconnect(self) -> None:
+        """Handle WebSocket reconnection."""
+        logger.info("Trade update stream reconnected")
 
     def _init_strategies(self) -> None:
         """Initialize all trading strategies."""
@@ -363,6 +436,55 @@ class TradingAgent:
 
         logger.info("Daily reset complete")
 
+    async def _start_streaming(self) -> None:
+        """
+        Start WebSocket streaming for trade updates.
+
+        Per Alpaca documentation:
+        - Connects to wss://paper-api.alpaca.markets/stream (paper) or
+          wss://api.alpaca.markets/stream (live)
+        - Authenticates and subscribes to trade_updates stream
+        - Handles automatic reconnection with exponential backoff
+        """
+        logger.info("Starting WebSocket streaming for trade updates...")
+
+        try:
+            # Start the order update handler with auto-reconnection
+            self._streaming_task = asyncio.create_task(
+                self._order_handler.start_with_reconnect(max_attempts=10)
+            )
+            logger.info("Trade update WebSocket stream started")
+        except Exception as e:
+            logger.error(f"Failed to start trade update stream: {e}")
+
+    async def _stop_streaming(self) -> None:
+        """Stop WebSocket streaming."""
+        logger.info("Stopping WebSocket streaming...")
+
+        try:
+            # Stop order update handler
+            if self._order_handler.is_running():
+                await self._order_handler.stop()
+
+            # Cancel streaming task
+            if self._streaming_task and not self._streaming_task.done():
+                self._streaming_task.cancel()
+                try:
+                    await self._streaming_task
+                except asyncio.CancelledError:
+                    pass
+
+            logger.info("WebSocket streaming stopped")
+        except Exception as e:
+            logger.error(f"Error stopping streaming: {e}")
+
+    def get_streaming_status(self) -> dict:
+        """Get status of WebSocket streams for monitoring."""
+        return {
+            "order_updates": self._order_handler.get_health_status(),
+            "data_stream": self._data_streamer.get_health_status() if self._data_streamer else None,
+        }
+
     async def run(self) -> None:
         """
         Main run loop for the trading agent.
@@ -371,6 +493,11 @@ class TradingAgent:
         - Active from Sunday 8 PM ET through Friday 8 PM ET
         - Sleeps during weekend closure (Friday 8 PM - Sunday 8 PM ET)
         - Respects extended hours and overnight trading settings
+
+        WebSocket streaming:
+        - Starts trade update stream on agent start
+        - Receives real-time order fills, cancellations, rejections
+        - Auto-reconnects on disconnection
         """
         logger.info("Starting Trading Agent with 24/5 support...")
         self._is_running = True
@@ -395,6 +522,9 @@ class TradingAgent:
         else:
             logger.error("Failed to get account info - check API credentials")
             return
+
+        # Start WebSocket streaming for trade updates
+        await self._start_streaming()
 
         # Track last logged session to avoid log spam
         last_session = None
@@ -476,6 +606,9 @@ class TradingAgent:
         """Graceful shutdown of the agent."""
         logger.info("Initiating graceful shutdown...")
         self._shutdown_event.set()
+
+        # Stop WebSocket streaming
+        await self._stop_streaming()
 
         # Give time for current operations to complete
         await asyncio.sleep(2)

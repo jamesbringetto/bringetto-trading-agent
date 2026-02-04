@@ -247,3 +247,58 @@ class MetricsCollector:
                 strategy_name=strategy_name
             )
             logger.info(f"Metrics reset for strategy: {strategy_name}")
+
+    # -------------------------------------------------------------------------
+    # WebSocket Event Recording Methods
+    # -------------------------------------------------------------------------
+
+    def record_fill(self, update: dict[str, Any]) -> None:
+        """
+        Record an order fill event from WebSocket stream.
+
+        Args:
+            update: Fill event data from OrderUpdateHandler
+        """
+        logger.debug(
+            f"Recording fill: {update.get('symbol')} - "
+            f"Qty: {update.get('filled_qty')} @ ${update.get('filled_avg_price')}"
+        )
+        # Store in trade history for analysis
+        self._trade_history.append({
+            "type": "fill",
+            "timestamp": datetime.utcnow().isoformat(),
+            **update,
+        })
+
+    def record_rejection(self, update: dict[str, Any]) -> None:
+        """
+        Record an order rejection event from WebSocket stream.
+
+        Args:
+            update: Rejection event data from OrderUpdateHandler
+        """
+        logger.warning(
+            f"Recording rejection: {update.get('symbol')} - Order {update.get('order_id')}"
+        )
+        # Store rejection for analysis
+        self._trade_history.append({
+            "type": "rejection",
+            "timestamp": datetime.utcnow().isoformat(),
+            **update,
+        })
+
+    def record_trade_event(self, event: str, update: dict[str, Any]) -> None:
+        """
+        Record any trade event from WebSocket stream.
+
+        Args:
+            event: Event type (new, fill, canceled, etc.)
+            update: Event data from OrderUpdateHandler
+        """
+        logger.debug(f"Recording trade event: {event} - {update.get('symbol')}")
+        # Store all events for comprehensive tracking
+        self._trade_history.append({
+            "type": event,
+            "timestamp": datetime.utcnow().isoformat(),
+            **update,
+        })
