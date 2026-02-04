@@ -178,6 +178,43 @@ export interface TradeDistribution {
   side_distribution: { buy: number; sell: number };
 }
 
+// Market status types
+export interface MarketStatus {
+  is_open: boolean;
+  current_session: 'overnight' | 'pre_market' | 'regular' | 'after_hours' | 'unknown';
+  session_display: string;
+  next_open: string | null;
+  next_close: string | null;
+  timestamp: string;
+  can_trade_regular: boolean;
+  can_trade_extended: boolean;
+  can_trade_overnight: boolean;
+}
+
+export interface AssetInfo {
+  symbol: string;
+  name: string | null;
+  exchange: string | null;
+  status: string | null;
+  tradable: boolean;
+  fractionable: boolean;
+  marginable: boolean;
+  shortable: boolean;
+  easy_to_borrow: boolean;
+  overnight_tradable: boolean;
+  has_options: boolean;
+}
+
+export interface Quote {
+  symbol: string;
+  bid: number;
+  ask: number;
+  bid_size: number;
+  ask_size: number;
+  timestamp: string;
+  error?: string;
+}
+
 // ============================================================================
 // API Client
 // ============================================================================
@@ -393,6 +430,22 @@ class ApiClient {
     return this.fetch<TradeDistribution>(
       `/api/analytics/trade-distribution?days=${days}`
     );
+  }
+
+  // --------------------------------------------------------------------------
+  // Market
+  // --------------------------------------------------------------------------
+
+  async getMarketStatus(): Promise<MarketStatus> {
+    return this.fetch<MarketStatus>('/api/market/status');
+  }
+
+  async getAssetInfo(symbol: string): Promise<AssetInfo> {
+    return this.fetch<AssetInfo>(`/api/market/asset/${symbol}`);
+  }
+
+  async getQuote(symbol: string): Promise<Quote> {
+    return this.fetch<Quote>(`/api/market/quote/${symbol}`);
   }
 }
 
