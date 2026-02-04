@@ -52,7 +52,7 @@ class VWAPReversion(BaseStrategy):
         "max_hold_minutes": TradingConstants.VWAP_MAX_HOLD_MINUTES,
         "position_size_pct": TradingConstants.VWAP_POSITION_SIZE_PCT,
         "max_positions": TradingConstants.VWAP_MAX_POSITIONS,
-        "allowed_symbols": list(TradingConstants.TIER_2_ASSETS),
+        "allowed_symbols": list(TradingConstants.SP500_ASSETS),
         "min_volume": 1_000,  # Per-bar volume (lowered for paper trading)
     }
 

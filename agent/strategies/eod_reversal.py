@@ -44,7 +44,7 @@ class EODReversal(BaseStrategy):
         "exit_minute": TradingConstants.EOD_EXIT_MINUTE,
         "position_size_pct": TradingConstants.EOD_POSITION_SIZE_PCT,
         "max_positions": TradingConstants.EOD_MAX_POSITIONS,
-        "allowed_symbols": list(TradingConstants.TIER_1_ASSETS),
+        "allowed_symbols": list(TradingConstants.SP500_ASSETS),
         "min_volume": 1_000,  # Per-bar volume (lowered for paper trading)
     }
 
