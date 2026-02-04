@@ -14,16 +14,18 @@ WebSocket Streaming:
 import asyncio
 import signal
 import sys
+from collections import defaultdict
 from datetime import datetime, timedelta
+from decimal import Decimal
 
 import pytz
 from dateutil import parser as date_parser
 from loguru import logger
 
 from agent.api.state import set_agent_state
-from agent.config.constants import TradingSession
+from agent.config.constants import TradingConstants, TradingSession
 from agent.config.settings import get_settings
-from agent.data.streaming import DataStreamer
+from agent.data.streaming import BarData, DataStreamer, QuoteData
 from agent.execution.broker import AlpacaBroker, OrderUpdateHandler
 from agent.monitoring.instrumentation import get_instrumentation
 from agent.monitoring.logger import setup_logging
@@ -37,6 +39,7 @@ from agent.strategies import (
     OpeningRangeBreakout,
     VWAPReversion,
 )
+from agent.strategies.base import MarketContext
 
 # How many seconds before market open to switch to 1-second checks
 PRE_MARKET_READY_SECONDS = 5
@@ -75,6 +78,12 @@ class TradingAgent:
         self._order_handler = OrderUpdateHandler()
         self._data_streamer: DataStreamer | None = None
         self._streaming_task: asyncio.Task | None = None
+        self._data_streaming_task: asyncio.Task | None = None
+
+        # Market data cache - stores latest data per symbol
+        self._latest_bars: dict[str, BarData] = {}
+        self._latest_quotes: dict[str, QuoteData] = {}
+        self._daily_bars: dict[str, list[BarData]] = defaultdict(list)
 
         # Register order update callbacks
         self._setup_order_callbacks()
@@ -183,6 +192,184 @@ class TradingAgent:
             logger.info("Strategy enabled: EOD Reversal")
 
         logger.info(f"Initialized {len(self._strategies)} strategies")
+
+    def _get_trading_symbols(self) -> list[str]:
+        """Get all symbols that strategies want to trade."""
+        # Combine TIER_1 and TIER_2 assets
+        symbols = set(TradingConstants.TIER_1_ASSETS + TradingConstants.TIER_2_ASSETS)
+        logger.info(f"Trading symbols: {sorted(symbols)}")
+        return list(symbols)
+
+    def _on_bar_data(self, bar: BarData) -> None:
+        """Handle incoming bar data from streaming."""
+        self._latest_bars[bar.symbol] = bar
+        self._daily_bars[bar.symbol].append(bar)
+
+        # Keep only last 100 bars per symbol to limit memory
+        if len(self._daily_bars[bar.symbol]) > 100:
+            self._daily_bars[bar.symbol] = self._daily_bars[bar.symbol][-100:]
+
+    def _on_quote_data(self, quote: QuoteData) -> None:
+        """Handle incoming quote data from streaming."""
+        self._latest_quotes[quote.symbol] = quote
+
+    def _build_market_context(self, symbol: str) -> MarketContext | None:
+        """
+        Build MarketContext for a symbol from cached data.
+
+        Returns None if insufficient data is available.
+        """
+        bar = self._latest_bars.get(symbol)
+        quote = self._latest_quotes.get(symbol)
+
+        if bar is None:
+            return None
+
+        # Calculate OHLC from daily bars if available
+        daily_bars = self._daily_bars.get(symbol, [])
+        if daily_bars:
+            open_price = daily_bars[0].open
+            high_price = max(b.high for b in daily_bars)
+            low_price = min(b.low for b in daily_bars)
+            total_volume = sum(b.volume for b in daily_bars)
+        else:
+            open_price = bar.open
+            high_price = bar.high
+            low_price = bar.low
+            total_volume = bar.volume
+
+        return MarketContext(
+            symbol=symbol,
+            current_price=bar.close,
+            open_price=open_price,
+            high_price=high_price,
+            low_price=low_price,
+            volume=total_volume,
+            vwap=bar.vwap,
+            bid=quote.bid if quote else None,
+            ask=quote.ask if quote else None,
+            timestamp=bar.timestamp,
+        )
+
+    async def _start_market_data_streaming(self) -> None:
+        """
+        Start market data streaming for all trading symbols.
+
+        Subscribes to bars and quotes for TIER_1 and TIER_2 assets.
+        """
+        logger.info("Starting market data streaming...")
+
+        symbols = self._get_trading_symbols()
+
+        # Initialize data streamer
+        self._data_streamer = DataStreamer()
+
+        # Register callbacks
+        self._data_streamer.on_bar(self._on_bar_data)
+        self._data_streamer.on_quote(self._on_quote_data)
+
+        # Register disconnect/reconnect handlers
+        self._data_streamer.on_disconnect(self._on_data_stream_disconnect)
+        self._data_streamer.on_reconnect(self._on_data_stream_reconnect)
+
+        # Subscribe to data
+        await self._data_streamer.subscribe_bars(symbols)
+        await self._data_streamer.subscribe_quotes(symbols)
+
+        # Start streaming in background task
+        self._data_streaming_task = asyncio.create_task(
+            self._data_streamer.start(auto_reconnect=True)
+        )
+
+        logger.info(f"Market data streaming started for {len(symbols)} symbols")
+
+    def _on_data_stream_disconnect(self, error: str) -> None:
+        """Handle market data stream disconnection."""
+        logger.warning(f"Market data stream disconnected: {error}")
+
+    def _on_data_stream_reconnect(self) -> None:
+        """Handle market data stream reconnection."""
+        logger.info("Market data stream reconnected")
+
+    async def _stop_market_data_streaming(self) -> None:
+        """Stop market data streaming."""
+        if self._data_streamer:
+            await self._data_streamer.stop()
+
+        if self._data_streaming_task and not self._data_streaming_task.done():
+            self._data_streaming_task.cancel()
+            try:
+                await self._data_streaming_task
+            except asyncio.CancelledError:
+                pass
+
+        logger.info("Market data streaming stopped")
+
+    async def _evaluate_strategies(self) -> None:
+        """
+        Evaluate all strategies against current market data.
+
+        For each symbol with market data:
+        1. Build MarketContext
+        2. Call strategy.evaluate_entry() for applicable strategies
+        3. Process any generated signals
+        """
+        symbols = self._get_trading_symbols()
+        evaluated_count = 0
+
+        for symbol in symbols:
+            context = self._build_market_context(symbol)
+            if context is None:
+                continue
+
+            # Evaluate each active strategy
+            for strategy in self._strategies:
+                if not strategy.is_active:
+                    continue
+
+                # Check if this symbol is relevant for this strategy
+                if not self._is_symbol_for_strategy(symbol, strategy):
+                    continue
+
+                # Skip if strategy already has position in this symbol
+                if strategy.has_position(symbol):
+                    # TODO: Evaluate exit conditions
+                    continue
+
+                # Evaluate entry conditions
+                signal = strategy.evaluate_entry(context)
+                evaluated_count += 1
+
+                if signal:
+                    # Signal generated - process it
+                    logger.info(
+                        f"Signal generated: {strategy.name} | {symbol} | "
+                        f"{signal.side.value} @ ${signal.entry_price}"
+                    )
+                    # TODO: Validate with risk manager and execute trade
+
+        if evaluated_count > 0:
+            logger.debug(f"Evaluated {evaluated_count} strategy/symbol combinations")
+
+    def _is_symbol_for_strategy(self, symbol: str, strategy) -> bool:
+        """Check if a symbol is relevant for a given strategy."""
+        tier_1 = TradingConstants.TIER_1_ASSETS
+        tier_2 = TradingConstants.TIER_2_ASSETS
+
+        strategy_name = strategy.name.lower()
+
+        # ORB and EOD Reversal trade TIER_1 (SPY, QQQ, IWM)
+        if "orb" in strategy_name or "opening range" in strategy_name:
+            return symbol in tier_1
+        if "eod" in strategy_name or "reversal" in strategy_name:
+            return symbol in tier_1
+
+        # VWAP Reversion trades TIER_2
+        if "vwap" in strategy_name:
+            return symbol in tier_2
+
+        # Momentum and Gap strategies can trade both tiers
+        return symbol in tier_1 or symbol in tier_2
 
     def _on_circuit_breaker_trigger(self, reason: str) -> None:
         """Callback when circuit breaker is triggered."""
@@ -548,6 +735,9 @@ class TradingAgent:
         # Start WebSocket streaming for trade updates
         await self._start_streaming()
 
+        # Start market data streaming
+        await self._start_market_data_streaming()
+
         # Start instrumentation heartbeat for data reception monitoring
         await get_instrumentation().start_heartbeat()
 
@@ -597,13 +787,13 @@ class TradingAgent:
                         # Check strategies for auto-disable
                         await self._check_strategies()
 
-                        # Process strategies
-                        # In a real implementation, this would:
-                        # 1. Get market data (use appropriate feed for session)
-                        # 2. Pass to strategies for signal generation
-                        # 3. Validate signals (check order type restrictions for overnight)
-                        # 4. Execute trades (LIMIT only for overnight session)
-                        # 5. Monitor positions
+                        # Evaluate strategies against current market data
+                        # This will:
+                        # 1. Build MarketContext from streaming data
+                        # 2. Call strategy.evaluate_entry() for each symbol
+                        # 3. Record all evaluations via instrumentation
+                        # 4. Generate signals for valid entry conditions
+                        await self._evaluate_strategies()
 
                         # Note: During overnight session, only LIMIT orders with
                         # DAY or GTC TIF are supported. Strategies should be aware
@@ -634,6 +824,9 @@ class TradingAgent:
 
         # Stop instrumentation heartbeat
         await get_instrumentation().stop_heartbeat()
+
+        # Stop market data streaming
+        await self._stop_market_data_streaming()
 
         # Stop WebSocket streaming
         await self._stop_streaming()
