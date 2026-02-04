@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
 import { formatCurrency, formatPercent } from '@/lib/utils';
 import { StrategyPerformanceChart } from '@/components/charts/strategy-performance';
+import { MarketStatusWidget } from '@/components/market-status';
 import { RecentTrades } from '@/components/recent-trades';
 import { StatusCard } from '@/components/status-card';
 import {
@@ -104,6 +105,35 @@ export default function Dashboard() {
           icon={Clock}
           loading={isLoading}
         />
+      </div>
+
+      {/* Market Status */}
+      <div className="grid gap-6 lg:grid-cols-3">
+        <MarketStatusWidget />
+        <div className="lg:col-span-2 rounded-lg border bg-card p-6">
+          <h2 className="text-lg font-semibold mb-4">24/5 Trading Schedule</h2>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+            <div className="p-3 rounded-lg bg-indigo-500/10 border border-indigo-500/20">
+              <p className="text-indigo-500 font-medium">Overnight</p>
+              <p className="text-muted-foreground">8:00 PM - 4:00 AM ET</p>
+            </div>
+            <div className="p-3 rounded-lg bg-orange-500/10 border border-orange-500/20">
+              <p className="text-orange-500 font-medium">Pre-Market</p>
+              <p className="text-muted-foreground">4:00 AM - 9:30 AM ET</p>
+            </div>
+            <div className="p-3 rounded-lg bg-green-500/10 border border-green-500/20">
+              <p className="text-green-500 font-medium">Regular</p>
+              <p className="text-muted-foreground">9:30 AM - 4:00 PM ET</p>
+            </div>
+            <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/20">
+              <p className="text-amber-500 font-medium">After Hours</p>
+              <p className="text-muted-foreground">4:00 PM - 8:00 PM ET</p>
+            </div>
+          </div>
+          <p className="mt-4 text-xs text-muted-foreground">
+            Trading available Sunday 8 PM ET through Friday 8 PM ET. Overnight sessions support LIMIT orders only.
+          </p>
+        </div>
       </div>
 
       {/* Charts Row */}

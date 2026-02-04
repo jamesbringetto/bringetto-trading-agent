@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 from pydantic import BaseModel
 
-from agent.api.routes import analytics, controls, performance, strategies, trades
+from agent.api.routes import analytics, controls, market, performance, strategies, trades
 from agent.api.state import get_agent_state, set_agent_state
 from agent.config.settings import get_settings
 
@@ -63,6 +63,7 @@ def create_app() -> FastAPI:
     app.include_router(performance.router, prefix="/api/performance", tags=["performance"])
     app.include_router(controls.router, prefix="/api/controls", tags=["controls"])
     app.include_router(analytics.router, prefix="/api/analytics", tags=["analytics"])
+    app.include_router(market.router, prefix="/api/market", tags=["market"])
 
     @app.get("/", tags=["root"])
     async def root():
