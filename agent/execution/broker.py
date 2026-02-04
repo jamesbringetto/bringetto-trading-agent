@@ -9,8 +9,14 @@ Compliance Notes:
 - All order rejections are logged for compliance reporting
 - Rate limiting with exponential backoff is implemented
 - WebSocket reconnection is handled automatically
+
+WebSocket Streaming:
+- Trade updates via wss://paper-api.alpaca.markets/stream (paper trading)
+- Trade updates via wss://api.alpaca.markets/stream (live trading)
+- Supports all trade update events per Alpaca documentation
 """
 
+import asyncio
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -1071,11 +1077,30 @@ class AlpacaBroker:
 
 class OrderUpdateHandler:
     """
-    Real-time order update handler using Alpaca's TradingStream.
+    Real-time order update handler using Alpaca's TradingStream WebSocket.
 
-    Provides callbacks for order fills, cancellations, and other events
-    to enable real-time position and P&L tracking.
+    Connects to wss://paper-api.alpaca.markets/stream (paper) or
+    wss://api.alpaca.markets/stream (live) for trade_updates.
+
+    Per Alpaca's WebSocket documentation:
+    - Uses binary frames (not text frames)
+    - Authenticates with API key and secret
+    - Subscribes to trade_updates stream for order fills, cancellations, etc.
+
+    Handles all trade update events:
+    - Common: new, fill, partial_fill, canceled, expired, done_for_day, replaced
+    - Less common: accepted, rejected, pending_new, stopped, pending_cancel,
+      pending_replace, calculated, suspended, order_replace_rejected, order_cancel_rejected
     """
+
+    # All possible trade update events from Alpaca
+    COMMON_EVENTS = {"new", "fill", "partial_fill", "canceled", "expired", "done_for_day", "replaced"}
+    LESS_COMMON_EVENTS = {
+        "accepted", "rejected", "pending_new", "stopped", "pending_cancel",
+        "pending_replace", "calculated", "suspended", "order_replace_rejected",
+        "order_cancel_rejected"
+    }
+    ALL_EVENTS = COMMON_EVENTS | LESS_COMMON_EVENTS
 
     def __init__(self):
         settings = get_settings()
@@ -1085,17 +1110,41 @@ class OrderUpdateHandler:
 
         self._trading_stream: TradingStream | None = None
         self._is_running = False
+        self._is_authenticated = False
+        self._reconnect_attempts = 0
+        self._max_reconnect_attempts = 10
+        self._last_update_time: datetime | None = None
 
         # Callbacks for different event types
         self._on_fill_callbacks: list[Callable[[dict], None]] = []
         self._on_partial_fill_callbacks: list[Callable[[dict], None]] = []
         self._on_cancel_callbacks: list[Callable[[dict], None]] = []
         self._on_reject_callbacks: list[Callable[[dict], None]] = []
+        self._on_new_callbacks: list[Callable[[dict], None]] = []
+        self._on_replaced_callbacks: list[Callable[[dict], None]] = []
+        self._on_expired_callbacks: list[Callable[[dict], None]] = []
+        self._on_done_for_day_callbacks: list[Callable[[dict], None]] = []
 
-        logger.info("OrderUpdateHandler initialized")
+        # Generic callback for any event
+        self._on_any_event_callbacks: list[Callable[[str, dict], None]] = []
+
+        # Error and connection callbacks
+        self._on_error_callbacks: list[Callable[[str], None]] = []
+        self._on_disconnect_callbacks: list[Callable[[str], None]] = []
+        self._on_reconnect_callbacks: list[Callable[[], None]] = []
+
+        logger.info(
+            f"OrderUpdateHandler initialized - "
+            f"Paper trading: {self._is_paper}, "
+            f"Endpoint: {'paper-api' if self._is_paper else 'api'}.alpaca.markets/stream"
+        )
+
+    # -------------------------------------------------------------------------
+    # Callback Registration
+    # -------------------------------------------------------------------------
 
     def on_fill(self, callback: Callable[[dict], None]) -> None:
-        """Register callback for order fills."""
+        """Register callback for order fills (complete fills)."""
         self._on_fill_callbacks.append(callback)
 
     def on_partial_fill(self, callback: Callable[[dict], None]) -> None:
@@ -1110,39 +1159,128 @@ class OrderUpdateHandler:
         """Register callback for order rejections."""
         self._on_reject_callbacks.append(callback)
 
+    def on_new(self, callback: Callable[[dict], None]) -> None:
+        """Register callback for new orders (routed to exchange)."""
+        self._on_new_callbacks.append(callback)
+
+    def on_replaced(self, callback: Callable[[dict], None]) -> None:
+        """Register callback for replaced orders."""
+        self._on_replaced_callbacks.append(callback)
+
+    def on_expired(self, callback: Callable[[dict], None]) -> None:
+        """Register callback for expired orders."""
+        self._on_expired_callbacks.append(callback)
+
+    def on_done_for_day(self, callback: Callable[[dict], None]) -> None:
+        """Register callback for done_for_day events."""
+        self._on_done_for_day_callbacks.append(callback)
+
+    def on_any_event(self, callback: Callable[[str, dict], None]) -> None:
+        """Register callback for any trade update event."""
+        self._on_any_event_callbacks.append(callback)
+
+    def on_error(self, callback: Callable[[str], None]) -> None:
+        """Register callback for WebSocket errors."""
+        self._on_error_callbacks.append(callback)
+
+    def on_disconnect(self, callback: Callable[[str], None]) -> None:
+        """Register callback for disconnection events."""
+        self._on_disconnect_callbacks.append(callback)
+
+    def on_reconnect(self, callback: Callable[[], None]) -> None:
+        """Register callback for successful reconnection."""
+        self._on_reconnect_callbacks.append(callback)
+
+    # -------------------------------------------------------------------------
+    # Event Handling
+    # -------------------------------------------------------------------------
+
     async def _handle_trade_update(self, data) -> None:
         """
         Handle incoming trade updates from the TradingStream.
 
-        Trade update events include:
-        - new: Order received
-        - fill: Order completely filled
-        - partial_fill: Order partially filled
-        - canceled: Order canceled
-        - expired: Order expired
-        - rejected: Order rejected
-        - replaced: Order replaced
+        Trade update events per Alpaca documentation:
+
+        Common Events:
+        - new: Order routed to exchanges for execution
+        - fill: Order completely filled (includes timestamp, price, qty, position_qty)
+        - partial_fill: Order partially filled (includes timestamp, price, qty, position_qty)
+        - canceled: Order cancelation processed (includes timestamp)
+        - expired: Order expired per time_in_force (includes timestamp)
+        - done_for_day: Order done for day, will resume next trading day
+        - replaced: Order replacement processed (includes timestamp)
+
+        Less Common Events:
+        - accepted: Order received but not yet routed
+        - rejected: Order rejected (includes timestamp)
+        - pending_new: Order routed but not yet accepted
+        - stopped: Order stopped, trade guaranteed but not yet occurred
+        - pending_cancel: Order awaiting cancelation
+        - pending_replace: Order awaiting replacement
+        - calculated: Order filled/done_for_day, settlement pending
+        - suspended: Order suspended, not eligible for trading
+        - order_replace_rejected: Order replace rejected
+        - order_cancel_rejected: Order cancel rejected
         """
         try:
             event = data.event
             order = data.order
+            self._last_update_time = datetime.now(ET)
 
+            # Build update info dict with all available fields
             update_info = {
                 "event": event,
                 "order_id": str(order.id),
+                "client_order_id": str(order.client_order_id) if order.client_order_id else None,
                 "symbol": order.symbol,
-                "side": order.side.value,
+                "side": order.side.value if order.side else None,
+                "order_type": order.order_type.value if order.order_type else None,
                 "qty": float(order.qty) if order.qty else None,
                 "filled_qty": float(order.filled_qty) if order.filled_qty else None,
                 "filled_avg_price": float(order.filled_avg_price) if order.filled_avg_price else None,
-                "status": order.status.value,
-                "timestamp": data.timestamp.isoformat() if hasattr(data, 'timestamp') else None,
+                "limit_price": float(order.limit_price) if order.limit_price else None,
+                "stop_price": float(order.stop_price) if order.stop_price else None,
+                "status": order.status.value if order.status else None,
+                "time_in_force": order.time_in_force.value if order.time_in_force else None,
+                "extended_hours": order.extended_hours,
+                "created_at": order.created_at.isoformat() if order.created_at else None,
+                "updated_at": order.updated_at.isoformat() if order.updated_at else None,
+                "submitted_at": order.submitted_at.isoformat() if order.submitted_at else None,
+                "filled_at": order.filled_at.isoformat() if order.filled_at else None,
+                "canceled_at": order.canceled_at.isoformat() if order.canceled_at else None,
+                "expired_at": order.expired_at.isoformat() if order.expired_at else None,
             }
 
-            logger.info(f"Trade update: {event} - {order.symbol} - Order {order.id}")
+            # Add event-specific fields if present
+            if hasattr(data, 'timestamp') and data.timestamp:
+                update_info["timestamp"] = data.timestamp.isoformat()
+            if hasattr(data, 'price') and data.price:
+                update_info["price"] = float(data.price)
+            if hasattr(data, 'qty') and data.qty:
+                update_info["event_qty"] = float(data.qty)
+            if hasattr(data, 'position_qty') and data.position_qty:
+                update_info["position_qty"] = float(data.position_qty)
+            if hasattr(data, 'execution_id') and data.execution_id:
+                update_info["execution_id"] = str(data.execution_id)
 
-            # Route to appropriate callbacks
+            logger.info(
+                f"Trade update: {event} - {order.symbol} - "
+                f"Order {order.id} - Status: {order.status.value if order.status else 'unknown'}"
+            )
+
+            # Call generic event callbacks first
+            for callback in self._on_any_event_callbacks:
+                try:
+                    callback(event, update_info)
+                except Exception as e:
+                    logger.error(f"Error in any_event callback: {e}")
+
+            # Route to specific event callbacks
             if event == "fill":
+                logger.info(
+                    f"ORDER FILLED: {order.symbol} - "
+                    f"Qty: {order.filled_qty} @ ${order.filled_avg_price}"
+                )
                 for callback in self._on_fill_callbacks:
                     try:
                         callback(update_info)
@@ -1150,29 +1288,81 @@ class OrderUpdateHandler:
                         logger.error(f"Error in fill callback: {e}")
 
             elif event == "partial_fill":
+                logger.info(
+                    f"PARTIAL FILL: {order.symbol} - "
+                    f"Filled: {order.filled_qty}/{order.qty}"
+                )
                 for callback in self._on_partial_fill_callbacks:
                     try:
                         callback(update_info)
                     except Exception as e:
                         logger.error(f"Error in partial fill callback: {e}")
 
-            elif event in ("canceled", "expired"):
+            elif event == "new":
+                logger.debug(f"NEW ORDER: {order.symbol} - Order {order.id}")
+                for callback in self._on_new_callbacks:
+                    try:
+                        callback(update_info)
+                    except Exception as e:
+                        logger.error(f"Error in new order callback: {e}")
+
+            elif event in ("canceled", "cancelled"):  # Handle both spellings
+                logger.info(f"ORDER CANCELED: {order.symbol} - Order {order.id}")
                 for callback in self._on_cancel_callbacks:
                     try:
                         callback(update_info)
                     except Exception as e:
                         logger.error(f"Error in cancel callback: {e}")
 
+            elif event == "expired":
+                logger.info(f"ORDER EXPIRED: {order.symbol} - Order {order.id}")
+                for callback in self._on_expired_callbacks:
+                    try:
+                        callback(update_info)
+                    except Exception as e:
+                        logger.error(f"Error in expired callback: {e}")
+
             elif event == "rejected":
-                logger.error(f"Order rejected: {order.symbol} - {order.id}")
+                logger.error(f"ORDER REJECTED: {order.symbol} - Order {order.id}")
                 for callback in self._on_reject_callbacks:
                     try:
                         callback(update_info)
                     except Exception as e:
                         logger.error(f"Error in reject callback: {e}")
 
+            elif event == "replaced":
+                logger.info(f"ORDER REPLACED: {order.symbol} - Order {order.id}")
+                for callback in self._on_replaced_callbacks:
+                    try:
+                        callback(update_info)
+                    except Exception as e:
+                        logger.error(f"Error in replaced callback: {e}")
+
+            elif event == "done_for_day":
+                logger.info(f"ORDER DONE FOR DAY: {order.symbol} - Order {order.id}")
+                for callback in self._on_done_for_day_callbacks:
+                    try:
+                        callback(update_info)
+                    except Exception as e:
+                        logger.error(f"Error in done_for_day callback: {e}")
+
+            elif event in self.LESS_COMMON_EVENTS:
+                logger.debug(f"Trade update ({event}): {order.symbol} - Order {order.id}")
+
+            else:
+                logger.warning(f"Unknown trade update event: {event}")
+
         except Exception as e:
             logger.error(f"Error handling trade update: {e}")
+            for callback in self._on_error_callbacks:
+                try:
+                    callback(f"Error handling trade update: {e}")
+                except Exception as cb_error:
+                    logger.error(f"Error in error callback: {cb_error}")
+
+    # -------------------------------------------------------------------------
+    # Stream Management
+    # -------------------------------------------------------------------------
 
     def _init_stream(self) -> None:
         """Initialize the trading stream."""
@@ -1182,10 +1372,17 @@ class OrderUpdateHandler:
                 secret_key=self._secret_key,
                 paper=self._is_paper,
             )
+            # Subscribe to trade_updates per Alpaca documentation
             self._trading_stream.subscribe_trade_updates(self._handle_trade_update)
+            logger.info("TradingStream initialized and subscribed to trade_updates")
 
     async def start(self) -> None:
-        """Start the trading stream for real-time order updates."""
+        """
+        Start the trading stream for real-time order updates.
+
+        Connects to Alpaca's WebSocket endpoint and authenticates.
+        Per Alpaca docs, sends auth message then listens to trade_updates stream.
+        """
         if self._is_running:
             logger.warning("OrderUpdateHandler already running")
             return
@@ -1201,8 +1398,65 @@ class OrderUpdateHandler:
             await self._trading_stream._run_forever()
         except Exception as e:
             self._is_running = False
-            logger.error(f"Trading stream error: {e}")
+            error_msg = f"Trading stream error: {e}"
+            logger.error(error_msg)
+
+            # Notify disconnect callbacks
+            for callback in self._on_disconnect_callbacks:
+                try:
+                    callback(error_msg)
+                except Exception as cb_error:
+                    logger.error(f"Error in disconnect callback: {cb_error}")
+
             raise
+
+    async def start_with_reconnect(self, max_attempts: int = 10) -> None:
+        """
+        Start the trading stream with automatic reconnection.
+
+        Args:
+            max_attempts: Maximum number of reconnection attempts
+        """
+        self._max_reconnect_attempts = max_attempts
+        self._reconnect_attempts = 0
+
+        while self._reconnect_attempts < self._max_reconnect_attempts:
+            try:
+                # Reset stream on reconnect
+                if self._reconnect_attempts > 0:
+                    self._trading_stream = None
+                    logger.info(
+                        f"Reconnecting to trading stream "
+                        f"(attempt {self._reconnect_attempts + 1}/{self._max_reconnect_attempts})"
+                    )
+
+                await self.start()
+
+                # If we get here, stream ended normally
+                break
+
+            except Exception as e:
+                self._reconnect_attempts += 1
+                logger.error(f"Trading stream disconnected: {e}")
+
+                if self._reconnect_attempts >= self._max_reconnect_attempts:
+                    logger.critical(
+                        f"Max reconnection attempts ({self._max_reconnect_attempts}) reached. "
+                        "Trading stream permanently disconnected."
+                    )
+                    raise
+
+                # Exponential backoff: 1s, 2s, 4s, 8s, ... up to 60s
+                delay = min(2 ** self._reconnect_attempts, 60)
+                logger.warning(f"Reconnecting in {delay} seconds...")
+                await asyncio.sleep(delay)
+
+                # Notify reconnect callbacks
+                for callback in self._on_reconnect_callbacks:
+                    try:
+                        callback()
+                    except Exception as cb_error:
+                        logger.error(f"Error in reconnect callback: {cb_error}")
 
     def run_sync(self) -> None:
         """Run the trading stream synchronously (blocking)."""
@@ -1225,8 +1479,25 @@ class OrderUpdateHandler:
         if self._trading_stream and self._is_running:
             await self._trading_stream.stop()
             self._is_running = False
+            self._is_authenticated = False
             logger.info("Trading stream stopped")
 
     def is_running(self) -> bool:
         """Check if the stream is running."""
         return self._is_running
+
+    def get_health_status(self) -> dict[str, Any]:
+        """Get health status for monitoring."""
+        now = datetime.now(ET)
+        last_update_age = None
+
+        if self._last_update_time:
+            last_update_age = (now - self._last_update_time).total_seconds()
+
+        return {
+            "is_running": self._is_running,
+            "is_paper": self._is_paper,
+            "reconnect_attempts": self._reconnect_attempts,
+            "last_update_time": self._last_update_time.isoformat() if self._last_update_time else None,
+            "last_update_age_seconds": last_update_age,
+        }
