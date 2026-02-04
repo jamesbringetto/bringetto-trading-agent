@@ -25,8 +25,8 @@ class Settings(BaseSettings):
         description="Alpaca API base URL",
     )
     alpaca_data_feed: Literal["sip", "iex"] = Field(
-        default="sip",
-        description="Market data feed: 'sip' (paid, real-time) or 'iex' (free, limited)",
+        default="iex",
+        description="Market data feed: 'sip' (paid/full account) or 'iex' (free, Paper Only accounts must use this)",
     )
 
     # Trading Configuration
