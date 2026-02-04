@@ -515,10 +515,31 @@ class TradingAgent:
         if account:
             logger.info(
                 f"Account status - "
+                f"Status: {account.status.value}, "
                 f"Equity: ${account.equity:,.2f}, "
                 f"Cash: ${account.cash:,.2f}, "
                 f"Buying power: ${account.buying_power:,.2f}"
             )
+            logger.info(
+                f"Account permissions - "
+                f"Can trade: {account.can_trade()}, "
+                f"Can day trade: {account.can_day_trade()}, "
+                f"Shorting enabled: {account.shorting_enabled}, "
+                f"PDT flag: {account.pattern_day_trader}"
+            )
+
+            # Check for account restrictions
+            if account.trading_blocked:
+                logger.error("TRADING BLOCKED - Account cannot place orders")
+                return
+            if account.account_blocked:
+                logger.error("ACCOUNT BLOCKED - Account is blocked from all activity")
+                return
+            if account.trade_suspended_by_user:
+                logger.warning("Trading suspended by user - will not execute trades")
+            if not account.is_active():
+                logger.error(f"Account not active - Status: {account.status.value}")
+                return
         else:
             logger.error("Failed to get account info - check API credentials")
             return
