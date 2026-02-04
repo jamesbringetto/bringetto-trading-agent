@@ -1,10 +1,10 @@
 """Trading constants and enums."""
 
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 
 
-class AccountStatus(str, Enum):
+class AccountStatus(StrEnum):
     """Alpaca account status.
 
     Per Alpaca documentation:
@@ -26,7 +26,7 @@ class AccountStatus(str, Enum):
     REJECTED = "REJECTED"
 
 
-class AccountActivityType(str, Enum):
+class AccountActivityType(StrEnum):
     """Alpaca account activity types for non-trade activities.
 
     Per Alpaca Activities API documentation:
@@ -104,7 +104,7 @@ class AccountActivityType(str, Enum):
     CFEE = "CFEE"
 
 
-class OrderType(str, Enum):
+class OrderType(StrEnum):
     """Order type per Alpaca API."""
 
     MARKET = "market"
@@ -114,7 +114,7 @@ class OrderType(str, Enum):
     TRAILING_STOP = "trailing_stop"
 
 
-class OrderClass(str, Enum):
+class OrderClass(StrEnum):
     """Order class per Alpaca API.
 
     - simple: Standard single-leg order
@@ -129,7 +129,7 @@ class OrderClass(str, Enum):
     OTO = "oto"
 
 
-class StrategyType(str, Enum):
+class StrategyType(StrEnum):
     """Trading strategy types."""
 
     ORB = "orb"
@@ -140,14 +140,14 @@ class StrategyType(str, Enum):
     EXPERIMENTAL = "experimental"
 
 
-class OrderSide(str, Enum):
+class OrderSide(StrEnum):
     """Order side."""
 
     BUY = "buy"
     SELL = "sell"
 
 
-class OrderStatus(str, Enum):
+class OrderStatus(StrEnum):
     """Order status from broker."""
 
     PENDING = "pending"
@@ -159,7 +159,7 @@ class OrderStatus(str, Enum):
     EXPIRED = "expired"
 
 
-class TradeStatus(str, Enum):
+class TradeStatus(StrEnum):
     """Internal trade status."""
 
     OPEN = "open"
@@ -167,7 +167,7 @@ class TradeStatus(str, Enum):
     CANCELLED = "cancelled"
 
 
-class DecisionType(str, Enum):
+class DecisionType(StrEnum):
     """Trade decision type."""
 
     ENTRY = "entry"
@@ -175,7 +175,7 @@ class DecisionType(str, Enum):
     HOLD = "hold"
 
 
-class MarketRegime(str, Enum):
+class MarketRegime(StrEnum):
     """Market regime classification."""
 
     TRENDING_UP = "trending_up"
@@ -184,7 +184,7 @@ class MarketRegime(str, Enum):
     VOLATILE = "volatile"
 
 
-class AlertSeverity(str, Enum):
+class AlertSeverity(StrEnum):
     """Alert severity levels."""
 
     INFO = "info"
@@ -193,7 +193,7 @@ class AlertSeverity(str, Enum):
     CRITICAL = "critical"
 
 
-class TradingSession(str, Enum):
+class TradingSession(StrEnum):
     """Trading session types for 24/5 trading.
 
     Per Alpaca 24/5 trading:
