@@ -9,26 +9,26 @@ export default function SettingsPage() {
 
   const { data: status } = useQuery({
     queryKey: ['status'],
-    queryFn: api.getTradingStatus,
+    queryFn: () => api.getTradingStatus(),
     refetchInterval: 5000,
   });
 
   const killMutation = useMutation({
-    mutationFn: api.activateKillSwitch,
+    mutationFn: () => api.activateKillSwitch(),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['status'] });
     },
   });
 
   const pauseMutation = useMutation({
-    mutationFn: api.pauseTrading,
+    mutationFn: () => api.pauseTrading(),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['status'] });
     },
   });
 
   const resumeMutation = useMutation({
-    mutationFn: api.resumeTrading,
+    mutationFn: () => api.resumeTrading(),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['status'] });
     },

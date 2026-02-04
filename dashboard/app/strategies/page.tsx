@@ -10,7 +10,7 @@ export default function StrategiesPage() {
 
   const { data: strategies, isLoading } = useQuery({
     queryKey: ['strategies'],
-    queryFn: api.getStrategies,
+    queryFn: () => api.getStrategies(),
   });
 
   const toggleMutation = useMutation({
