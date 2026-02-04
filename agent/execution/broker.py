@@ -250,9 +250,7 @@ class AlpacaBroker:
         # Data stream will be initialized when needed
         self._data_stream: StockDataStream | None = None
 
-        logger.info(
-            f"AlpacaBroker initialized - Paper trading: {self._is_paper}"
-        )
+        logger.info(f"AlpacaBroker initialized - Paper trading: {self._is_paper}")
 
     def _retry_with_backoff(self, func, *args, **kwargs):
         """
@@ -267,9 +265,11 @@ class AlpacaBroker:
             except APIError as e:
                 last_exception = e
                 # Check for rate limit (429) or server errors (5xx)
-                if hasattr(e, 'status_code') and e.status_code in (429, 500, 502, 503, 504):
-                    wait_time = INITIAL_BACKOFF_SECONDS * (2 ** attempt)
-                    logger.warning(f"Rate limited or server error, retrying in {wait_time}s (attempt {attempt + 1}/{MAX_RETRIES})")
+                if hasattr(e, "status_code") and e.status_code in (429, 500, 502, 503, 504):
+                    wait_time = INITIAL_BACKOFF_SECONDS * (2**attempt)
+                    logger.warning(
+                        f"Rate limited or server error, retrying in {wait_time}s (attempt {attempt + 1}/{MAX_RETRIES})"
+                    )
                     time.sleep(wait_time)
                 else:
                     raise
@@ -306,7 +306,9 @@ class AlpacaBroker:
                 can_day_trade = True
                 reason = "Day trading allowed"
 
-            logger.debug(f"PDT Status: is_pdt={is_pdt}, count={day_trade_count}, equity=${equity:.2f}, can_trade={can_day_trade}")
+            logger.debug(
+                f"PDT Status: is_pdt={is_pdt}, count={day_trade_count}, equity=${equity:.2f}, can_trade={can_day_trade}"
+            )
 
             return PDTStatus(
                 is_pdt=is_pdt,
@@ -335,7 +337,7 @@ class AlpacaBroker:
         error_msg = str(e)
 
         # Check for PDT rejection (403)
-        if isinstance(e, APIError) and hasattr(e, 'status_code'):
+        if isinstance(e, APIError) and hasattr(e, "status_code"):
             if e.status_code == 403:
                 logger.error(
                     f"PDT PROTECTION: Order rejected for {symbol} - {action}. "
@@ -420,10 +422,7 @@ class AlpacaBroker:
             )
 
             # Use retry with backoff for rate limiting
-            order = self._retry_with_backoff(
-                self._trading_client.submit_order,
-                order_data
-            )
+            order = self._retry_with_backoff(self._trading_client.submit_order, order_data)
 
             logger.info(
                 f"Market order submitted: {side.value} {qty or notional} {symbol} "
@@ -433,7 +432,9 @@ class AlpacaBroker:
             return OrderResult(
                 success=True,
                 order_id=str(order.id),
-                filled_price=Decimal(str(order.filled_avg_price)) if order.filled_avg_price else None,
+                filled_price=Decimal(str(order.filled_avg_price))
+                if order.filled_avg_price
+                else None,
                 filled_qty=Decimal(str(order.filled_qty)) if order.filled_qty else None,
                 status=self._convert_order_status(order.status),
                 message="Order submitted successfully",
@@ -481,10 +482,7 @@ class AlpacaBroker:
                 extended_hours=extended_hours,
             )
 
-            order = self._retry_with_backoff(
-                self._trading_client.submit_order,
-                order_data
-            )
+            order = self._retry_with_backoff(self._trading_client.submit_order, order_data)
 
             logger.info(
                 f"Limit order submitted: {side.value} {qty} {symbol} @ ${limit_price} "
@@ -494,7 +492,9 @@ class AlpacaBroker:
             return OrderResult(
                 success=True,
                 order_id=str(order.id),
-                filled_price=Decimal(str(order.filled_avg_price)) if order.filled_avg_price else None,
+                filled_price=Decimal(str(order.filled_avg_price))
+                if order.filled_avg_price
+                else None,
                 filled_qty=Decimal(str(order.filled_qty)) if order.filled_qty else None,
                 status=self._convert_order_status(order.status),
                 message="Order submitted successfully",
@@ -529,10 +529,7 @@ class AlpacaBroker:
                 time_in_force=TimeInForce.DAY,
             )
 
-            order = self._retry_with_backoff(
-                self._trading_client.submit_order,
-                order_data
-            )
+            order = self._retry_with_backoff(self._trading_client.submit_order, order_data)
 
             logger.info(
                 f"Stop order submitted: {side.value} {qty} {symbol} @ stop ${stop_price} "
@@ -580,10 +577,7 @@ class AlpacaBroker:
                 time_in_force=TimeInForce.DAY,
             )
 
-            order = self._retry_with_backoff(
-                self._trading_client.submit_order,
-                order_data
-            )
+            order = self._retry_with_backoff(self._trading_client.submit_order, order_data)
 
             logger.info(
                 f"Stop-limit order submitted: {side.value} {qty} {symbol} "
@@ -640,10 +634,7 @@ class AlpacaBroker:
                 time_in_force=TimeInForce.DAY,
             )
 
-            order = self._retry_with_backoff(
-                self._trading_client.submit_order,
-                order_data
-            )
+            order = self._retry_with_backoff(self._trading_client.submit_order, order_data)
 
             trail_info = f"${trail_price}" if trail_price else f"{trail_percent}%"
             logger.info(
@@ -674,6 +665,7 @@ class AlpacaBroker:
         stop_loss_limit_price: Decimal | None = None,
         entry_type: str = "market",
         limit_price: Decimal | None = None,
+        client_order_id: str | None = None,
     ) -> OrderResult:
         """
         Submit a bracket order with take profit and stop loss attached.
@@ -682,6 +674,9 @@ class AlpacaBroker:
         - Entry order fills first
         - Take profit (limit) and stop loss orders are placed
         - When one child order fills, the other is cancelled
+
+        Uses GTC (Good-Til-Cancelled) time-in-force so the stop loss
+        and take profit legs survive after market close.
 
         Args:
             symbol: Stock symbol
@@ -692,6 +687,7 @@ class AlpacaBroker:
             stop_loss_limit_price: Limit price for stop loss (optional, creates stop-limit)
             entry_type: "market" or "limit" for entry order
             limit_price: Required if entry_type is "limit"
+            client_order_id: Optional client-specified order ID for tracking (max 48 chars)
         """
         try:
             # Build take profit leg
@@ -706,6 +702,10 @@ class AlpacaBroker:
             else:
                 stop_loss = StopLossRequest(stop_price=float(stop_loss_price))
 
+            # Use GTC so bracket legs (stop/take-profit) survive market close
+            # This prevents positions being left unprotected overnight
+            tif = TimeInForce.GTC
+
             # Build the appropriate entry order
             if entry_type == "limit":
                 if limit_price is None:
@@ -715,26 +715,25 @@ class AlpacaBroker:
                     side=self._convert_order_side(side),
                     qty=float(qty),
                     limit_price=float(limit_price),
-                    time_in_force=TimeInForce.DAY,
+                    time_in_force=tif,
                     order_class="bracket",
                     take_profit=take_profit,
                     stop_loss=stop_loss,
+                    client_order_id=client_order_id,
                 )
             else:
                 order_data = MarketOrderRequest(
                     symbol=symbol,
                     side=self._convert_order_side(side),
                     qty=float(qty),
-                    time_in_force=TimeInForce.DAY,
+                    time_in_force=tif,
                     order_class="bracket",
                     take_profit=take_profit,
                     stop_loss=stop_loss,
+                    client_order_id=client_order_id,
                 )
 
-            order = self._retry_with_backoff(
-                self._trading_client.submit_order,
-                order_data
-            )
+            order = self._retry_with_backoff(self._trading_client.submit_order, order_data)
 
             logger.info(
                 f"Bracket order submitted: {side.value} {qty} {symbol} "
@@ -744,7 +743,9 @@ class AlpacaBroker:
             return OrderResult(
                 success=True,
                 order_id=str(order.id),
-                filled_price=Decimal(str(order.filled_avg_price)) if order.filled_avg_price else None,
+                filled_price=Decimal(str(order.filled_avg_price))
+                if order.filled_avg_price
+                else None,
                 filled_qty=Decimal(str(order.filled_qty)) if order.filled_qty else None,
                 status=self._convert_order_status(order.status),
                 message="Bracket order submitted successfully",
@@ -805,10 +806,7 @@ class AlpacaBroker:
                 stop_loss=stop_loss,
             )
 
-            order = self._retry_with_backoff(
-                self._trading_client.submit_order,
-                order_data
-            )
+            order = self._retry_with_backoff(self._trading_client.submit_order, order_data)
 
             logger.info(
                 f"OCO order submitted: {side.value} {qty} {symbol} "
@@ -862,7 +860,9 @@ class AlpacaBroker:
         has_stop = stop_loss_price is not None
         has_profit = take_profit_price is not None
         if has_stop == has_profit:
-            raise ValueError("Must specify exactly one of stop_loss_price or take_profit_price for OTO")
+            raise ValueError(
+                "Must specify exactly one of stop_loss_price or take_profit_price for OTO"
+            )
 
         try:
             # Build the single exit leg
@@ -905,12 +905,11 @@ class AlpacaBroker:
                     stop_loss=stop_loss,
                 )
 
-            order = self._retry_with_backoff(
-                self._trading_client.submit_order,
-                order_data
-            )
+            order = self._retry_with_backoff(self._trading_client.submit_order, order_data)
 
-            exit_info = f"TP=${take_profit_price}" if take_profit_price else f"SL=${stop_loss_price}"
+            exit_info = (
+                f"TP=${take_profit_price}" if take_profit_price else f"SL=${stop_loss_price}"
+            )
             logger.info(
                 f"OTO order submitted: {side.value} {qty} {symbol} "
                 f"{exit_info} - Order ID: {order.id}"
@@ -919,7 +918,9 @@ class AlpacaBroker:
             return OrderResult(
                 success=True,
                 order_id=str(order.id),
-                filled_price=Decimal(str(order.filled_avg_price)) if order.filled_avg_price else None,
+                filled_price=Decimal(str(order.filled_avg_price))
+                if order.filled_avg_price
+                else None,
                 filled_qty=Decimal(str(order.filled_qty)) if order.filled_qty else None,
                 status=self._convert_order_status(order.status),
                 message="OTO order submitted successfully",
@@ -990,10 +991,7 @@ class AlpacaBroker:
     def cancel_order(self, order_id: str) -> bool:
         """Cancel an open order."""
         try:
-            self._retry_with_backoff(
-                self._trading_client.cancel_order_by_id,
-                order_id
-            )
+            self._retry_with_backoff(self._trading_client.cancel_order_by_id, order_id)
             logger.info(f"Order cancelled: {order_id}")
             return True
         except Exception as e:
@@ -1017,7 +1015,9 @@ class AlpacaBroker:
             return OrderResult(
                 success=True,
                 order_id=str(order.id),
-                filled_price=Decimal(str(order.filled_avg_price)) if order.filled_avg_price else None,
+                filled_price=Decimal(str(order.filled_avg_price))
+                if order.filled_avg_price
+                else None,
                 filled_qty=Decimal(str(order.filled_qty)) if order.filled_qty else None,
                 status=self._convert_order_status(order.status),
                 message="Order retrieved",
@@ -1031,10 +1031,7 @@ class AlpacaBroker:
         """Get all open orders."""
         try:
             request = GetOrdersRequest(status=QueryOrderStatus.OPEN)
-            orders = self._retry_with_backoff(
-                self._trading_client.get_orders,
-                filter=request
-            )
+            orders = self._retry_with_backoff(self._trading_client.get_orders, filter=request)
             return [
                 {
                     "id": str(o.id),
@@ -1090,15 +1087,14 @@ class AlpacaBroker:
     def close_position(self, symbol: str) -> OrderResult:
         """Close an entire position."""
         try:
-            order = self._retry_with_backoff(
-                self._trading_client.close_position,
-                symbol
-            )
+            order = self._retry_with_backoff(self._trading_client.close_position, symbol)
             logger.info(f"Position closed: {symbol}")
             return OrderResult(
                 success=True,
                 order_id=str(order.id),
-                filled_price=Decimal(str(order.filled_avg_price)) if order.filled_avg_price else None,
+                filled_price=Decimal(str(order.filled_avg_price))
+                if order.filled_avg_price
+                else None,
                 filled_qty=Decimal(str(order.filled_qty)) if order.filled_qty else None,
                 status=self._convert_order_status(order.status),
                 message="Position closed",
@@ -1113,10 +1109,7 @@ class AlpacaBroker:
         This is used by the kill switch and circuit breaker.
         """
         try:
-            self._retry_with_backoff(
-                self._trading_client.close_all_positions,
-                cancel_orders=True
-            )
+            self._retry_with_backoff(self._trading_client.close_all_positions, cancel_orders=True)
             logger.warning("ALL POSITIONS CLOSED - Emergency exit")
             return True
         except Exception as e:
@@ -1134,7 +1127,11 @@ class AlpacaBroker:
 
             # Parse account status to enum
             try:
-                status = AccountStatus(account.status.value if hasattr(account.status, 'value') else str(account.status))
+                status = AccountStatus(
+                    account.status.value
+                    if hasattr(account.status, "value")
+                    else str(account.status)
+                )
             except ValueError:
                 logger.warning(f"Unknown account status: {account.status}, defaulting to ACTIVE")
                 status = AccountStatus.ACTIVE
@@ -1146,7 +1143,9 @@ class AlpacaBroker:
                     created_at = account.created_at
                 elif isinstance(account.created_at, str):
                     try:
-                        created_at = datetime.fromisoformat(account.created_at.replace('Z', '+00:00'))
+                        created_at = datetime.fromisoformat(
+                            account.created_at.replace("Z", "+00:00")
+                        )
                     except ValueError:
                         logger.warning(f"Could not parse created_at: {account.created_at}")
 
@@ -1154,54 +1153,70 @@ class AlpacaBroker:
                 # Account identification
                 account_number=account.account_number or "",
                 status=status,
-                crypto_status=getattr(account, 'crypto_status', None),
-                currency=getattr(account, 'currency', 'USD') or 'USD',
-
+                crypto_status=getattr(account, "crypto_status", None),
+                currency=getattr(account, "currency", "USD") or "USD",
                 # Cash and equity
                 equity=Decimal(str(account.equity)),
                 cash=Decimal(str(account.cash)),
-                last_equity=Decimal(str(account.last_equity)) if account.last_equity else Decimal(str(account.equity)),
-
+                last_equity=Decimal(str(account.last_equity))
+                if account.last_equity
+                else Decimal(str(account.equity)),
                 # Buying power
                 buying_power=Decimal(str(account.buying_power)),
-                regt_buying_power=Decimal(str(account.regt_buying_power)) if account.regt_buying_power else Decimal(str(account.buying_power)),
-                daytrading_buying_power=Decimal(str(account.daytrading_buying_power)) if account.daytrading_buying_power else None,
-                non_marginable_buying_power=Decimal(str(account.non_marginable_buying_power)) if account.non_marginable_buying_power else Decimal(0),
-
+                regt_buying_power=Decimal(str(account.regt_buying_power))
+                if account.regt_buying_power
+                else Decimal(str(account.buying_power)),
+                daytrading_buying_power=Decimal(str(account.daytrading_buying_power))
+                if account.daytrading_buying_power
+                else None,
+                non_marginable_buying_power=Decimal(str(account.non_marginable_buying_power))
+                if account.non_marginable_buying_power
+                else Decimal(0),
                 # Portfolio values
-                portfolio_value=Decimal(str(account.portfolio_value)) if account.portfolio_value else Decimal(str(account.equity)),
-                long_market_value=Decimal(str(account.long_market_value)) if account.long_market_value else Decimal(0),
-                short_market_value=Decimal(str(account.short_market_value)) if account.short_market_value else Decimal(0),
-
+                portfolio_value=Decimal(str(account.portfolio_value))
+                if account.portfolio_value
+                else Decimal(str(account.equity)),
+                long_market_value=Decimal(str(account.long_market_value))
+                if account.long_market_value
+                else Decimal(0),
+                short_market_value=Decimal(str(account.short_market_value))
+                if account.short_market_value
+                else Decimal(0),
                 # Margin info
-                initial_margin=Decimal(str(account.initial_margin)) if account.initial_margin else Decimal(0),
-                maintenance_margin=Decimal(str(account.maintenance_margin)) if account.maintenance_margin else Decimal(0),
-                last_maintenance_margin=Decimal(str(account.last_maintenance_margin)) if account.last_maintenance_margin else Decimal(0),
+                initial_margin=Decimal(str(account.initial_margin))
+                if account.initial_margin
+                else Decimal(0),
+                maintenance_margin=Decimal(str(account.maintenance_margin))
+                if account.maintenance_margin
+                else Decimal(0),
+                last_maintenance_margin=Decimal(str(account.last_maintenance_margin))
+                if account.last_maintenance_margin
+                else Decimal(0),
                 sma=Decimal(str(account.sma)) if account.sma else Decimal(0),
                 multiplier=str(account.multiplier) if account.multiplier else "1",
-
                 # Day trading
                 day_trade_count=account.daytrade_count or 0,
                 pattern_day_trader=account.pattern_day_trader or False,
-
                 # Trading restrictions
                 trading_blocked=account.trading_blocked or False,
                 transfers_blocked=account.transfers_blocked or False,
                 account_blocked=account.account_blocked or False,
                 trade_suspended_by_user=account.trade_suspended_by_user or False,
-
                 # Account features
                 shorting_enabled=account.shorting_enabled or False,
-                options_approved_level=getattr(account, 'options_approved_level', None),
-                options_trading_level=getattr(account, 'options_trading_level', None),
-
+                options_approved_level=getattr(account, "options_approved_level", None),
+                options_trading_level=getattr(account, "options_trading_level", None),
                 # Pending transfers
-                pending_transfer_in=Decimal(str(account.pending_transfer_in)) if getattr(account, 'pending_transfer_in', None) else None,
-                pending_transfer_out=Decimal(str(account.pending_transfer_out)) if getattr(account, 'pending_transfer_out', None) else None,
-
+                pending_transfer_in=Decimal(str(account.pending_transfer_in))
+                if getattr(account, "pending_transfer_in", None)
+                else None,
+                pending_transfer_out=Decimal(str(account.pending_transfer_out))
+                if getattr(account, "pending_transfer_out", None)
+                else None,
                 # Fees
-                accrued_fees=Decimal(str(account.accrued_fees)) if account.accrued_fees else Decimal(0),
-
+                accrued_fees=Decimal(str(account.accrued_fees))
+                if account.accrued_fees
+                else Decimal(0),
                 # Timestamps
                 created_at=created_at,
             )
@@ -1366,10 +1381,12 @@ class AlpacaBroker:
         try:
             asset = self._trading_client.get_asset(symbol)
             # Check for overnight_tradable in attributes
-            attributes = getattr(asset, 'attributes', []) or []
-            is_overnight = 'overnight_tradable' in attributes
+            attributes = getattr(asset, "attributes", []) or []
+            is_overnight = "overnight_tradable" in attributes
 
-            logger.debug(f"Asset {symbol} overnight_tradable: {is_overnight}, attributes: {attributes}")
+            logger.debug(
+                f"Asset {symbol} overnight_tradable: {is_overnight}, attributes: {attributes}"
+            )
             return is_overnight
         except Exception as e:
             logger.error(f"Failed to check overnight tradability for {symbol}: {e}")
@@ -1392,7 +1409,7 @@ class AlpacaBroker:
         """
         try:
             asset = self._trading_client.get_asset(symbol)
-            attributes = getattr(asset, 'attributes', []) or []
+            attributes = getattr(asset, "attributes", []) or []
 
             return {
                 "symbol": asset.symbol,
@@ -1404,8 +1421,8 @@ class AlpacaBroker:
                 "marginable": asset.marginable,
                 "shortable": asset.shortable,
                 "easy_to_borrow": asset.easy_to_borrow,
-                "overnight_tradable": 'overnight_tradable' in attributes,
-                "has_options": 'has_options' in attributes,
+                "overnight_tradable": "overnight_tradable" in attributes,
+                "has_options": "has_options" in attributes,
                 "attributes": attributes,
             }
         except Exception as e:
@@ -1499,11 +1516,26 @@ class OrderUpdateHandler:
     """
 
     # All possible trade update events from Alpaca
-    COMMON_EVENTS = {"new", "fill", "partial_fill", "canceled", "expired", "done_for_day", "replaced"}
+    COMMON_EVENTS = {
+        "new",
+        "fill",
+        "partial_fill",
+        "canceled",
+        "expired",
+        "done_for_day",
+        "replaced",
+    }
     LESS_COMMON_EVENTS = {
-        "accepted", "rejected", "pending_new", "stopped", "pending_cancel",
-        "pending_replace", "calculated", "suspended", "order_replace_rejected",
-        "order_cancel_rejected"
+        "accepted",
+        "rejected",
+        "pending_new",
+        "stopped",
+        "pending_cancel",
+        "pending_replace",
+        "calculated",
+        "suspended",
+        "order_replace_rejected",
+        "order_cancel_rejected",
     }
     ALL_EVENTS = COMMON_EVENTS | LESS_COMMON_EVENTS
 
@@ -1642,7 +1674,9 @@ class OrderUpdateHandler:
                 "order_type": order.order_type.value if order.order_type else None,
                 "qty": float(order.qty) if order.qty else None,
                 "filled_qty": float(order.filled_qty) if order.filled_qty else None,
-                "filled_avg_price": float(order.filled_avg_price) if order.filled_avg_price else None,
+                "filled_avg_price": float(order.filled_avg_price)
+                if order.filled_avg_price
+                else None,
                 "limit_price": float(order.limit_price) if order.limit_price else None,
                 "stop_price": float(order.stop_price) if order.stop_price else None,
                 "status": order.status.value if order.status else None,
@@ -1657,15 +1691,15 @@ class OrderUpdateHandler:
             }
 
             # Add event-specific fields if present
-            if hasattr(data, 'timestamp') and data.timestamp:
+            if hasattr(data, "timestamp") and data.timestamp:
                 update_info["timestamp"] = data.timestamp.isoformat()
-            if hasattr(data, 'price') and data.price:
+            if hasattr(data, "price") and data.price:
                 update_info["price"] = float(data.price)
-            if hasattr(data, 'qty') and data.qty:
+            if hasattr(data, "qty") and data.qty:
                 update_info["event_qty"] = float(data.qty)
-            if hasattr(data, 'position_qty') and data.position_qty:
+            if hasattr(data, "position_qty") and data.position_qty:
                 update_info["position_qty"] = float(data.position_qty)
-            if hasattr(data, 'execution_id') and data.execution_id:
+            if hasattr(data, "execution_id") and data.execution_id:
                 update_info["execution_id"] = str(data.execution_id)
 
             logger.info(
@@ -1694,8 +1728,7 @@ class OrderUpdateHandler:
 
             elif event == "partial_fill":
                 logger.info(
-                    f"PARTIAL FILL: {order.symbol} - "
-                    f"Filled: {order.filled_qty}/{order.qty}"
+                    f"PARTIAL FILL: {order.symbol} - Filled: {order.filled_qty}/{order.qty}"
                 )
                 for callback in self._on_partial_fill_callbacks:
                     try:
@@ -1852,7 +1885,7 @@ class OrderUpdateHandler:
                     raise
 
                 # Exponential backoff: 1s, 2s, 4s, 8s, ... up to 60s
-                delay = min(2 ** self._reconnect_attempts, 60)
+                delay = min(2**self._reconnect_attempts, 60)
                 logger.warning(f"Reconnecting in {delay} seconds...")
                 await asyncio.sleep(delay)
 
@@ -1903,6 +1936,8 @@ class OrderUpdateHandler:
             "is_running": self._is_running,
             "is_paper": self._is_paper,
             "reconnect_attempts": self._reconnect_attempts,
-            "last_update_time": self._last_update_time.isoformat() if self._last_update_time else None,
+            "last_update_time": self._last_update_time.isoformat()
+            if self._last_update_time
+            else None,
             "last_update_age_seconds": last_update_age,
         }

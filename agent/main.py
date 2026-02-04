@@ -15,8 +15,9 @@ import asyncio
 import contextlib
 import signal
 import sys
+import uuid
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 from decimal import Decimal
 
 import pytz
@@ -24,10 +25,21 @@ from dateutil import parser as date_parser
 from loguru import logger
 
 from agent.api.state import set_agent_state
-from agent.config.constants import TradingConstants, TradingSession
+from agent.config.constants import (
+    DecisionType,
+    OrderSide,
+    TradingConstants,
+    TradingSession,
+)
 from agent.config.settings import get_settings
 from agent.data.indicators import IndicatorCalculator
 from agent.data.streaming import BarData, DataStreamer, QuoteData
+from agent.database import get_session
+from agent.database.repositories import (
+    StrategyRepository,
+    TradeDecisionRepository,
+    TradeRepository,
+)
 from agent.execution.broker import AlpacaBroker, OrderUpdateHandler
 from agent.monitoring.instrumentation import get_instrumentation
 from agent.monitoring.logger import setup_logging
@@ -87,6 +99,13 @@ class TradingAgent:
         self._latest_quotes: dict[str, QuoteData] = {}
         self._daily_bars: dict[str, list[BarData]] = defaultdict(list)
 
+        # Order-to-trade mapping: broker_order_id -> {trade_id, strategy_name, symbol}
+        # Used to correlate WebSocket fill events back to database trades
+        self._order_trade_map: dict[str, dict] = {}
+
+        # Strategy name -> database UUID mapping (populated on startup)
+        self._strategy_db_ids: dict[str, uuid.UUID] = {}
+
         # Register order update callbacks
         self._setup_order_callbacks()
 
@@ -117,6 +136,7 @@ class TradingAgent:
         self._order_handler.on_partial_fill(self._on_partial_fill)
         self._order_handler.on_reject(self._on_order_reject)
         self._order_handler.on_cancel(self._on_order_cancel)
+        self._order_handler.on_expired(self._on_order_expired)
 
         # Track any event for metrics
         self._order_handler.on_any_event(self._on_any_trade_event)
@@ -128,13 +148,157 @@ class TradingAgent:
         logger.info("Order update callbacks registered")
 
     def _on_order_fill(self, update: dict) -> None:
-        """Handle order fill events from WebSocket."""
+        """Handle order fill events from WebSocket.
+
+        This is the critical callback that closes the trade lifecycle:
+        - For entry fills: updates trade record with actual fill price
+        - For exit fills (stop loss / take profit): closes trade with P&L,
+          removes strategy position, feeds circuit breaker
+        """
+        order_id = update.get("order_id")
+        symbol = update.get("symbol")
+        filled_price = update.get("filled_avg_price")
+        filled_qty = update.get("filled_qty")
+        side = update.get("side")
+
         logger.info(
-            f"[FILL] {update['symbol']} - "
-            f"Qty: {update.get('filled_qty')} @ ${update.get('filled_avg_price')}"
+            f"[FILL] {symbol} - "
+            f"Qty: {filled_qty} @ ${filled_price} | "
+            f"Side: {side} | Order: {order_id}"
         )
-        # Update metrics
+
+        # Record in metrics
         self._metrics.record_fill(update)
+
+        # Check if this is an exit order (stop loss or take profit leg of a bracket)
+        # Exit orders have the opposite side from the entry
+        trade_info = self._order_trade_map.get(order_id)
+        if trade_info:
+            # This is an entry order we tracked - update the trade with fill price
+            self._handle_entry_fill(trade_info, update)
+            return
+
+        # Check if this fill closes an existing position by looking at strategy positions
+        # For bracket orders, the stop/take-profit legs have different order IDs
+        # So we match by symbol + opposite side
+        self._handle_potential_exit_fill(update)
+
+    def _handle_entry_fill(self, trade_info: dict, update: dict) -> None:
+        """Handle fill of an entry order - update trade with actual fill price."""
+        filled_price = update.get("filled_avg_price")
+        if filled_price is None:
+            return
+
+        trade_id = trade_info.get("trade_id")
+        if not trade_id:
+            return
+
+        try:
+            with get_session() as session:
+                repo = TradeRepository(session)
+                trade = repo.get_by_id(trade_id)
+                if trade:
+                    trade.entry_price = Decimal(str(filled_price))
+                    session.flush()
+                    logger.info(f"Updated trade {trade_id} entry price to ${filled_price}")
+        except Exception as e:
+            logger.error(f"Failed to update entry fill in database: {e}")
+
+    def _handle_potential_exit_fill(self, update: dict) -> None:
+        """Handle a fill that may be closing an existing position (stop/take-profit).
+
+        Matches by symbol across all strategies to find and close the trade.
+        """
+        symbol = update.get("symbol")
+        filled_price = update.get("filled_avg_price")
+        side = update.get("side")
+
+        if not symbol or filled_price is None or not side:
+            return
+
+        # Find the strategy that has this position
+        for strategy in self._strategies:
+            if not strategy.has_position(symbol):
+                continue
+
+            position_data = strategy._open_positions.get(symbol)
+            if not position_data:
+                continue
+
+            entry_side = position_data.get("side")
+            # Exit fills are the opposite side of entry
+            # Buy entry -> Sell exit, Sell entry -> Buy exit
+            if entry_side == "buy" and side != "sell":
+                continue
+            if entry_side == "sell" and side != "buy":
+                continue
+
+            # This fill is closing our position
+            entry_price = Decimal(str(position_data.get("entry_price", 0)))
+            exit_price = Decimal(str(filled_price))
+            qty = position_data.get("qty", 0)
+
+            # Calculate P&L
+            if entry_side == "buy":
+                pnl = (exit_price - entry_price) * qty
+            else:
+                pnl = (entry_price - exit_price) * qty
+
+            pnl_pct = (
+                (float(pnl) / (float(entry_price) * qty) * 100)
+                if entry_price > 0 and qty > 0
+                else 0
+            )
+
+            logger.info(
+                f"[TRADE CLOSED] {symbol} | Strategy: {strategy.name} | "
+                f"Entry: ${entry_price} -> Exit: ${exit_price} | "
+                f"P&L: ${pnl:.2f} ({pnl_pct:.2f}%)"
+            )
+
+            # 1. Close the trade in the database
+            trade_id = position_data.get("trade_id")
+            if trade_id:
+                try:
+                    with get_session() as session:
+                        repo = TradeRepository(session)
+                        repo.close_trade(
+                            trade_id=trade_id,
+                            exit_price=exit_price,
+                            pnl=pnl,
+                            pnl_percent=Decimal(str(round(pnl_pct, 2))),
+                        )
+                    logger.debug(f"Trade {trade_id} closed in database")
+                except Exception as e:
+                    logger.error(f"Failed to close trade in database: {e}")
+
+            # 2. Record in metrics collector
+            self._metrics.record_trade(
+                strategy_name=strategy.name,
+                pnl=pnl,
+                hold_time_seconds=0,  # Will be calculated from DB timestamps
+                trade_data={
+                    "symbol": symbol,
+                    "entry_price": float(entry_price),
+                    "exit_price": float(exit_price),
+                    "qty": qty,
+                    "side": entry_side,
+                },
+            )
+
+            # 3. Feed circuit breaker with P&L
+            self._circuit_breaker.record_trade(pnl, strategy.name)
+
+            # 4. Remove position from strategy tracking
+            strategy.remove_position(symbol)
+
+            # 5. Clean up order-trade map
+            order_id = position_data.get("order_id")
+            if order_id:
+                self._order_trade_map.pop(order_id, None)
+
+            # Only handle first matching strategy
+            break
 
     def _on_partial_fill(self, update: dict) -> None:
         """Handle partial fill events from WebSocket."""
@@ -145,16 +309,48 @@ class TradingAgent:
 
     def _on_order_reject(self, update: dict) -> None:
         """Handle order rejection events from WebSocket."""
-        logger.error(
-            f"[REJECTED] {update['symbol']} - Order {update['order_id']} - "
-            f"Status: {update.get('status')}"
-        )
+        order_id = update.get("order_id")
+        symbol = update.get("symbol")
+        logger.error(f"[REJECTED] {symbol} - Order {order_id} - Status: {update.get('status')}")
         # Record rejection for analysis
         self._metrics.record_rejection(update)
 
+        # If this was a tracked entry order, clean up
+        trade_info = self._order_trade_map.pop(order_id, None)
+        if trade_info:
+            strategy_name = trade_info.get("strategy_name")
+            for strategy in self._strategies:
+                if strategy.name == strategy_name:
+                    strategy.remove_position(symbol)
+                    break
+
     def _on_order_cancel(self, update: dict) -> None:
         """Handle order cancellation events from WebSocket."""
-        logger.info(f"[CANCELED] {update['symbol']} - Order {update['order_id']}")
+        order_id = update.get("order_id")
+        symbol = update.get("symbol")
+        logger.info(f"[CANCELED] {symbol} - Order {order_id}")
+
+        # Clean up if tracked entry
+        trade_info = self._order_trade_map.pop(order_id, None)
+        if trade_info:
+            strategy_name = trade_info.get("strategy_name")
+            for strategy in self._strategies:
+                if strategy.name == strategy_name:
+                    strategy.remove_position(symbol)
+                    break
+
+    def _on_order_expired(self, update: dict) -> None:
+        """Handle order expiration events from WebSocket.
+
+        For bracket orders with DAY TIF, the stop/take-profit legs expire
+        at market close. We need to handle this to avoid unprotected positions.
+        """
+        order_id = update.get("order_id")
+        symbol = update.get("symbol")
+        logger.warning(f"[EXPIRED] {symbol} - Order {order_id}")
+
+        # Clean up if tracked entry
+        self._order_trade_map.pop(order_id, None)
 
     def _on_any_trade_event(self, event: str, update: dict) -> None:
         """Handle any trade event for metrics tracking."""
@@ -163,7 +359,6 @@ class TradingAgent:
     def _on_stream_disconnect(self, error: str) -> None:
         """Handle WebSocket disconnection."""
         logger.warning(f"Trade update stream disconnected: {error}")
-        # TODO: Send alert notification
 
     def _on_stream_reconnect(self) -> None:
         """Handle WebSocket reconnection."""
@@ -358,7 +553,8 @@ class TradingAgent:
 
                 # Skip if strategy already has position in this symbol
                 if strategy.has_position(symbol):
-                    # TODO: Evaluate exit conditions
+                    # Evaluate exit conditions for existing positions
+                    self._evaluate_exit(symbol, strategy, context)
                     continue
 
                 # Evaluate entry conditions
@@ -386,12 +582,63 @@ class TradingAgent:
         allowed_symbols = strategy.parameters.get("allowed_symbols", [])
         return symbol in allowed_symbols
 
+    def _evaluate_exit(self, symbol: str, strategy: BaseStrategy, context: MarketContext) -> None:
+        """Evaluate exit conditions for an open position.
+
+        Calls the strategy's should_exit() method and submits a market sell
+        if exit conditions are met.
+        """
+        position_data = strategy._open_positions.get(symbol)
+        if not position_data:
+            return
+
+        entry_price = Decimal(str(position_data.get("entry_price", 0)))
+        entry_side_str = position_data.get("side", "buy")
+        entry_side = OrderSide.BUY if entry_side_str == "buy" else OrderSide.SELL
+
+        should_exit, reason = strategy.should_exit(context, entry_price, entry_side)
+
+        if not should_exit:
+            return
+
+        logger.info(f"Exit signal: {strategy.name} | {symbol} | Reason: {reason}")
+
+        # Submit market order to close the position
+        exit_side = OrderSide.SELL if entry_side == OrderSide.BUY else OrderSide.BUY
+        qty = Decimal(str(position_data.get("qty", 0)))
+
+        if qty <= 0:
+            return
+
+        # Cancel any existing bracket legs (stop/take-profit) before closing
+        order_id = position_data.get("order_id")
+        if order_id:
+            try:
+                self._broker.cancel_order(order_id)
+            except Exception as e:
+                logger.warning(f"Could not cancel bracket legs for {symbol}: {e}")
+
+        result = self._broker.submit_market_order(
+            symbol=symbol,
+            side=exit_side,
+            qty=qty,
+        )
+
+        if result.success:
+            logger.info(
+                f"Exit order submitted: {exit_side.value} {qty} {symbol} | Reason: {reason}"
+            )
+            # Position removal will happen in _handle_potential_exit_fill
+            # when the WebSocket fill event arrives
+        else:
+            logger.error(f"Exit order failed for {symbol}: {result.message}")
+
     def _execute_trade(self, signal: StrategySignal, strategy: BaseStrategy) -> bool:
         """
         Execute a trade based on a strategy signal.
 
-        Validates the signal, calculates position size, and submits a bracket order
-        with stop loss and take profit attached.
+        Validates the signal, calculates position size, submits a bracket order
+        with stop loss and take profit attached, and records the trade in the database.
 
         Args:
             signal: The trading signal from the strategy
@@ -410,6 +657,12 @@ class TradingAgent:
             logger.warning(f"Cannot execute trade - account cannot trade: {account.status}")
             return False
 
+        # PDT check before entry - a bracket order exit would be a day trade
+        pdt_status = self._broker.check_pdt_status()
+        if pdt_status and not pdt_status.can_day_trade:
+            logger.warning(f"PDT protection: {pdt_status.reason} - skipping {signal.symbol}")
+            return False
+
         # Get current positions for validation
         positions = self._broker.get_positions()
         current_positions = len(positions)
@@ -425,9 +678,7 @@ class TradingAgent:
         )
 
         if not validation.is_valid:
-            logger.warning(
-                f"Signal validation failed for {signal.symbol}: {validation.reason}"
-            )
+            logger.warning(f"Signal validation failed for {signal.symbol}: {validation.reason}")
             return False
 
         # Log warnings if any
@@ -445,6 +696,9 @@ class TradingAgent:
             )
             return False
 
+        # Generate client_order_id for tracking: strategy_name-uuid (max 48 chars)
+        client_order_id = f"{strategy.name[:20]}-{uuid.uuid4().hex[:12]}"
+
         # Submit bracket order with stop loss and take profit
         logger.info(
             f"Executing trade: {signal.side.value} {shares} {signal.symbol} @ ~${signal.entry_price} | "
@@ -458,7 +712,8 @@ class TradingAgent:
             qty=Decimal(shares),
             take_profit_price=signal.take_profit,
             stop_loss_price=signal.stop_loss,
-            entry_type="market",  # Use market order for immediate fill
+            entry_type="market",
+            client_order_id=client_order_id,
         )
 
         if result.success:
@@ -466,9 +721,14 @@ class TradingAgent:
                 f"Order submitted successfully: {signal.symbol} | "
                 f"Order ID: {result.order_id} | Status: {result.status.value}"
             )
+
+            # Record trade in database
+            trade_id = self._record_trade_to_db(signal, strategy, shares, result.order_id)
+
             # Mark that strategy has a position in this symbol
             position_data = {
                 "order_id": result.order_id,
+                "trade_id": trade_id,
                 "symbol": signal.symbol,
                 "side": signal.side.value,
                 "qty": shares,
@@ -479,12 +739,241 @@ class TradingAgent:
                 "timestamp": datetime.now(self._et_tz).isoformat(),
             }
             strategy.add_position(signal.symbol, position_data)
+
+            # Track order -> trade mapping for fill handling
+            self._order_trade_map[result.order_id] = {
+                "trade_id": trade_id,
+                "strategy_name": strategy.name,
+                "symbol": signal.symbol,
+            }
+
             return True
         else:
-            logger.error(
-                f"Order submission failed for {signal.symbol}: {result.message}"
-            )
+            logger.error(f"Order submission failed for {signal.symbol}: {result.message}")
             return False
+
+    def _record_trade_to_db(
+        self,
+        signal: StrategySignal,
+        strategy: BaseStrategy,
+        shares: int,
+        broker_order_id: str,
+    ) -> uuid.UUID | None:
+        """Record a new trade to the database.
+
+        Returns the trade UUID or None if recording failed.
+        """
+        strategy_db_id = self._strategy_db_ids.get(strategy.name)
+        if not strategy_db_id:
+            logger.warning(f"No DB ID for strategy {strategy.name}, skipping trade record")
+            return None
+
+        try:
+            with get_session() as session:
+                trade_repo = TradeRepository(session)
+                trade = trade_repo.create(
+                    symbol=signal.symbol,
+                    strategy_id=strategy_db_id,
+                    side=signal.side,
+                    entry_price=signal.entry_price,
+                    quantity=Decimal(str(shares)),
+                    stop_loss=signal.stop_loss,
+                    take_profit=signal.take_profit,
+                    broker_order_id=broker_order_id,
+                )
+                trade_id = trade.id
+
+                # Record the trade decision
+                decision_repo = TradeDecisionRepository(session)
+                decision_repo.create(
+                    decision_type=DecisionType.ENTRY,
+                    strategy_name=strategy.name,
+                    strategy_version=strategy.parameters.get("version", "1.0.0"),
+                    symbol=signal.symbol,
+                    price=signal.entry_price,
+                    reasoning_text=(
+                        f"Entry signal: {signal.side.value} {shares} shares @ ${signal.entry_price} | "
+                        f"SL=${signal.stop_loss} TP=${signal.take_profit} | "
+                        f"Confidence={signal.confidence:.2f} R:R={signal.risk_reward_ratio:.2f}"
+                    ),
+                    trade_id=trade_id,
+                    confidence_score=Decimal(str(round(signal.confidence, 2))),
+                    expected_profit_pct=Decimal(
+                        str(
+                            round(
+                                abs(float(signal.take_profit - signal.entry_price))
+                                / float(signal.entry_price)
+                                * 100,
+                                2,
+                            )
+                        )
+                    ),
+                    expected_loss_pct=Decimal(
+                        str(
+                            round(
+                                abs(float(signal.entry_price - signal.stop_loss))
+                                / float(signal.entry_price)
+                                * 100,
+                                2,
+                            )
+                        )
+                    ),
+                )
+
+            logger.debug(f"Trade recorded in DB: {trade_id} for {signal.symbol}")
+            return trade_id
+
+        except Exception as e:
+            logger.error(f"Failed to record trade in database: {e}")
+            return None
+
+    def _ensure_strategies_in_db(self) -> None:
+        """Ensure all active strategies have records in the database.
+
+        Creates strategy records if they don't exist and populates
+        the _strategy_db_ids mapping.
+        """
+        from agent.config.constants import StrategyType
+
+        # Map strategy class names to StrategyType enum
+        strategy_type_map = {
+            "Opening Range Breakout": StrategyType.ORB,
+            "VWAP Mean Reversion": StrategyType.VWAP_REVERSION,
+            "Momentum Scalp": StrategyType.MOMENTUM_SCALP,
+            "Gap and Go": StrategyType.GAP_AND_GO,
+            "EOD Reversal": StrategyType.EOD_REVERSAL,
+        }
+
+        try:
+            with get_session() as session:
+                repo = StrategyRepository(session)
+                for strategy in self._strategies:
+                    existing = repo.get_by_name(strategy.name)
+                    if existing:
+                        self._strategy_db_ids[strategy.name] = existing.id
+                        logger.debug(f"Strategy {strategy.name} found in DB: {existing.id}")
+                    else:
+                        strategy_type = strategy_type_map.get(strategy.name, StrategyType.ORB)
+                        new_strategy = repo.create(
+                            name=strategy.name,
+                            strategy_type=strategy_type,
+                            parameters=strategy.parameters,
+                        )
+                        self._strategy_db_ids[strategy.name] = new_strategy.id
+                        logger.info(f"Strategy {strategy.name} created in DB: {new_strategy.id}")
+
+            logger.info(f"Strategy DB IDs: {len(self._strategy_db_ids)} strategies mapped")
+        except Exception as e:
+            logger.error(f"Failed to ensure strategies in database: {e}")
+
+    def _sync_positions_on_startup(self) -> None:
+        """Sync broker positions into strategy tracking on startup.
+
+        This prevents duplicate trades after agent restart by loading
+        existing positions from Alpaca and assigning them to the
+        appropriate strategy.
+        """
+        positions = self._broker.get_positions()
+        if not positions:
+            logger.info("No existing positions to sync on startup")
+            return
+
+        logger.info(f"Syncing {len(positions)} existing positions from broker...")
+
+        # Try to match positions to open trades in the database
+        try:
+            with get_session() as session:
+                trade_repo = TradeRepository(session)
+                open_trades = trade_repo.get_open_trades()
+
+                # Build symbol -> trade mapping
+                trade_by_symbol: dict[str, any] = {}
+                for trade in open_trades:
+                    trade_by_symbol[trade.symbol] = trade
+
+                for position in positions:
+                    symbol = position.symbol
+                    trade = trade_by_symbol.get(symbol)
+
+                    if trade:
+                        # Find strategy by DB ID
+                        strategy_name = None
+                        for name, db_id in self._strategy_db_ids.items():
+                            if db_id == trade.strategy_id:
+                                strategy_name = name
+                                break
+
+                        if strategy_name:
+                            for strategy in self._strategies:
+                                if strategy.name == strategy_name:
+                                    position_data = {
+                                        "order_id": trade.broker_order_id,
+                                        "trade_id": trade.id,
+                                        "symbol": symbol,
+                                        "side": trade.side.value
+                                        if hasattr(trade.side, "value")
+                                        else str(trade.side),
+                                        "qty": float(trade.quantity),
+                                        "entry_price": float(trade.entry_price),
+                                        "stop_loss": float(trade.stop_loss),
+                                        "take_profit": float(trade.take_profit),
+                                        "strategy": strategy_name,
+                                        "timestamp": trade.entry_time.isoformat()
+                                        if trade.entry_time
+                                        else "",
+                                    }
+                                    strategy.add_position(symbol, position_data)
+                                    logger.info(
+                                        f"Synced position: {symbol} -> {strategy_name} "
+                                        f"({trade.side} {trade.quantity} @ ${trade.entry_price})"
+                                    )
+                                    break
+                    else:
+                        # Position exists in broker but not in our DB - log warning
+                        logger.warning(
+                            f"Position {symbol} found in broker but not in trade database. "
+                            f"Qty: {position.qty}, Market value: ${position.market_value}"
+                        )
+
+        except Exception as e:
+            logger.error(f"Failed to sync positions from database: {e}")
+            # Fallback: load positions without DB trade IDs
+            for position in positions:
+                logger.warning(
+                    f"Untracked position: {position.symbol} - "
+                    f"Qty: {position.qty}, Value: ${position.market_value}"
+                )
+
+    def _close_all_day_trading_positions(self) -> None:
+        """Close all open positions before market close for day trading.
+
+        This should be called near end of day to ensure no positions
+        are held overnight (per day trading strategy).
+        """
+        positions = self._broker.get_positions()
+        if not positions:
+            return
+
+        logger.warning(f"EOD CLEANUP: Closing {len(positions)} positions before market close")
+
+        for position in positions:
+            symbol = position.symbol
+            qty = abs(position.qty)
+            side = OrderSide.SELL if position.qty > 0 else OrderSide.BUY
+
+            logger.info(f"EOD closing: {side.value} {qty} {symbol}")
+            try:
+                result = self._broker.submit_market_order(
+                    symbol=symbol,
+                    side=side,
+                    qty=Decimal(str(qty)),
+                )
+                if result.success:
+                    logger.info(f"EOD close order submitted: {symbol}")
+                else:
+                    logger.error(f"EOD close failed for {symbol}: {result.message}")
+            except Exception as e:
+                logger.error(f"EOD close error for {symbol}: {e}")
 
     def _on_circuit_breaker_trigger(self, reason: str) -> None:
         """Callback when circuit breaker is triggered."""
@@ -668,7 +1157,7 @@ class TradingAgent:
                 # Sleep until ready window, but cap at 5 minutes to allow for shutdown checks
                 sleep_time = min(
                     seconds_until_open - PRE_MARKET_READY_SECONDS,
-                    300  # Max 5 minute sleep intervals
+                    300,  # Max 5 minute sleep intervals
                 )
                 hours, remainder = divmod(int(seconds_until_open), 3600)
                 minutes, seconds = divmod(remainder, 60)
@@ -734,7 +1223,33 @@ class TradingAgent:
             if hasattr(strategy, "reset_daily"):
                 strategy.reset_daily()
 
+        # Clear stale order-trade mappings
+        self._order_trade_map.clear()
+
         logger.info("Daily reset complete")
+
+    def _should_close_eod_positions(self) -> bool:
+        """Check if it's time to close all positions for end of day.
+
+        Returns True when within the avoid_last_minutes window before market close.
+        """
+        now = self._get_market_time()
+        close_hour = self._settings.market_close_hour
+        close_minute = self._settings.market_close_minute
+        avoid_last = self._settings.avoid_last_minutes
+
+        # Calculate the cutoff time
+        cutoff_minutes = close_minute - avoid_last
+        cutoff_hour = close_hour
+        if cutoff_minutes < 0:
+            cutoff_hour -= 1
+            cutoff_minutes += 60
+
+        cutoff_time = time(cutoff_hour, cutoff_minutes)
+        market_close = time(close_hour, close_minute)
+
+        current_time = now.time()
+        return cutoff_time <= current_time <= market_close
 
     async def _start_streaming(self) -> None:
         """
@@ -842,6 +1357,12 @@ class TradingAgent:
             logger.error("Failed to get account info - check API credentials")
             return
 
+        # Ensure strategies exist in database and get their IDs
+        self._ensure_strategies_in_db()
+
+        # Sync existing positions from broker on startup
+        self._sync_positions_on_startup()
+
         # Start WebSocket streaming for trade updates
         await self._start_streaming()
 
@@ -854,6 +1375,7 @@ class TradingAgent:
         # Track last logged session to avoid log spam
         last_session = None
         last_can_trade = None
+        eod_closed_today = False
 
         # Main loop
         try:
@@ -897,12 +1419,30 @@ class TradingAgent:
                         # Check strategies for auto-disable
                         await self._check_strategies()
 
+                        # End-of-day position closure for day trading
+                        if (
+                            self._settings.trading_mode == "day_trading"
+                            and current_session == TradingSession.REGULAR
+                            and self._should_close_eod_positions()
+                            and not eod_closed_today
+                        ):
+                            self._close_all_day_trading_positions()
+                            eod_closed_today = True
+                            await asyncio.sleep(5)
+                            continue
+
+                        # Reset EOD flag at start of new day
+                        now_et = self._get_market_time()
+                        if now_et.hour < 10:
+                            eod_closed_today = False
+
                         # Evaluate strategies against current market data
                         # This will:
                         # 1. Build MarketContext from streaming data
                         # 2. Call strategy.evaluate_entry() for each symbol
-                        # 3. Record all evaluations via instrumentation
-                        # 4. Generate signals for valid entry conditions
+                        # 3. Evaluate exit conditions for open positions
+                        # 4. Record all evaluations via instrumentation
+                        # 5. Generate signals for valid entry conditions
                         await self._evaluate_strategies()
 
                         # Note: During overnight session, only LIMIT orders with
