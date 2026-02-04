@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     )
     alpaca_data_feed: Literal["sip", "iex"] = Field(
         default="sip",
-        description="Market data feed: 'sip' (paid, real-time) or 'iex' (free, limited)",
+        description="Market data feed: 'sip' (real-time, paid) or 'iex' (free, limited)",
     )
 
     # Trading Configuration
@@ -50,6 +50,17 @@ class Settings(BaseSettings):
     market_close_minute: int = Field(default=0, ge=0, le=59)
     avoid_first_minutes: int = Field(default=5, ge=0)
     avoid_last_minutes: int = Field(default=5, ge=0)
+
+    # 24/5 Extended Hours Trading
+    # Per Alpaca: Overnight 8PM-4AM, Pre-market 4AM-9:30AM, After-hours 4PM-8PM
+    enable_extended_hours: bool = Field(
+        default=True,
+        description="Enable pre-market and after-hours trading (4AM-8PM ET)",
+    )
+    enable_overnight_trading: bool = Field(
+        default=False,
+        description="Enable overnight trading (8PM-4AM ET). Only LIMIT orders with DAY/GTC TIF supported.",
+    )
 
     # Strategy Toggles
     enable_orb: bool = Field(default=True)

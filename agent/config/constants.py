@@ -68,6 +68,22 @@ class AlertSeverity(str, Enum):
     CRITICAL = "critical"
 
 
+class TradingSession(str, Enum):
+    """Trading session types for 24/5 trading.
+
+    Per Alpaca 24/5 trading:
+    - Overnight: 8:00 PM to 4:00 AM ET
+    - Pre-market: 4:00 AM to 9:30 AM ET
+    - Regular: 9:30 AM to 4:00 PM ET
+    - After-hours: 4:00 PM to 8:00 PM ET
+    """
+
+    OVERNIGHT = "overnight"
+    PRE_MARKET = "pre_market"
+    REGULAR = "regular"
+    AFTER_HOURS = "after_hours"
+
+
 @dataclass(frozen=True)
 class TradingConstants:
     """Trading constants and limits."""
@@ -111,6 +127,21 @@ class TradingConstants:
     MARKET_TIMEZONE: str = "America/New_York"
     PRE_MARKET_START_HOUR: int = 4
     AFTER_HOURS_END_HOUR: int = 20
+
+    # 24/5 Trading Session Times (ET)
+    # Overnight: 8:00 PM to 4:00 AM ET
+    OVERNIGHT_START_HOUR: int = 20  # 8:00 PM
+    OVERNIGHT_END_HOUR: int = 4     # 4:00 AM
+    # Pre-market: 4:00 AM to 9:30 AM ET
+    PRE_MARKET_END_HOUR: int = 9
+    PRE_MARKET_END_MINUTE: int = 30
+    # Regular: 9:30 AM to 4:00 PM ET
+    REGULAR_START_HOUR: int = 9
+    REGULAR_START_MINUTE: int = 30
+    REGULAR_END_HOUR: int = 16
+    # After-hours: 4:00 PM to 8:00 PM ET
+    AFTER_HOURS_START_HOUR: int = 16
+    # AFTER_HOURS_END_HOUR already defined above (20)
 
     # ORB Strategy
     ORB_RANGE_MINUTES: int = 15
