@@ -75,7 +75,7 @@ class StrategyEvaluation:
             "evaluation_type": self.evaluation_type,
             "decision": self.decision,
             "rejection_reason": self.rejection_reason,
-            "market_context": {
+            "context": {
                 "current_price": str(self.current_price) if self.current_price else None,
                 "volume": self.volume,
                 "vwap": str(self.vwap) if self.vwap else None,
@@ -155,55 +155,47 @@ class Instrumentation:
         # Calculate rates
         bars_per_second = stats.total_bars / runtime if runtime > 0 else 0
         quotes_per_second = stats.total_quotes / runtime if runtime > 0 else 0
+        trades_per_second = stats.total_trades / runtime if runtime > 0 else 0
 
-        # Data freshness
-        bar_age = (now - stats.last_bar_time).total_seconds() if stats.last_bar_time else None
-        quote_age = (now - stats.last_quote_time).total_seconds() if stats.last_quote_time else None
+        # Data freshness - use the most recent data time
+        last_times = [t for t in [stats.last_bar_time, stats.last_quote_time, stats.last_trade_time] if t]
+        last_data_time = max(last_times) if last_times else None
+        first_data_time = stats.start_time
+        data_freshness = (now - last_data_time).total_seconds() if last_data_time else None
 
         return {
-            "runtime_seconds": runtime,
-            "totals": {
-                "bars": stats.total_bars,
-                "quotes": stats.total_quotes,
-                "trades": stats.total_trades,
-            },
-            "rates": {
-                "bars_per_second": round(bars_per_second, 2),
-                "quotes_per_second": round(quotes_per_second, 2),
-            },
-            "freshness": {
-                "last_bar_age_seconds": round(bar_age, 1) if bar_age else None,
-                "last_quote_age_seconds": round(quote_age, 1) if quote_age else None,
-                "is_receiving_data": bar_age is not None and bar_age < 120,
-            },
-            "symbols_with_bars": len(stats.bars_per_symbol),
-            "symbols_with_quotes": len(stats.quotes_per_symbol),
-            "top_symbols_by_bars": dict(
-                sorted(
-                    stats.bars_per_symbol.items(),
-                    key=lambda x: x[1],
-                    reverse=True
-                )[:10]
-            ),
+            "total_bars": stats.total_bars,
+            "total_quotes": stats.total_quotes,
+            "total_trades": stats.total_trades,
+            "unique_symbols_bars": len(stats.bars_per_symbol),
+            "unique_symbols_quotes": len(stats.quotes_per_symbol),
+            "unique_symbols_trades": 0,  # Not tracked per symbol currently
+            "first_data_time": first_data_time.isoformat() if first_data_time else None,
+            "last_data_time": last_data_time.isoformat() if last_data_time else None,
+            "data_freshness_seconds": round(data_freshness, 1) if data_freshness else None,
+            "bars_per_second": round(bars_per_second, 2),
+            "quotes_per_second": round(quotes_per_second, 2),
+            "trades_per_second": round(trades_per_second, 2),
         }
 
     def log_heartbeat(self) -> None:
         """Log a heartbeat showing data reception status."""
         stats = self.get_data_stats()
-        freshness = stats["freshness"]
+        is_receiving = stats["data_freshness_seconds"] is not None and stats["data_freshness_seconds"] < 120
 
-        if freshness["is_receiving_data"]:
+        if is_receiving:
             logger.info(
                 f"[HEARTBEAT] Data flowing - "
-                f"Bars: {stats['totals']['bars']} ({stats['rates']['bars_per_second']}/s), "
-                f"Quotes: {stats['totals']['quotes']} ({stats['rates']['quotes_per_second']}/s), "
-                f"Symbols: {stats['symbols_with_bars']} bars, {stats['symbols_with_quotes']} quotes, "
-                f"Last bar: {freshness['last_bar_age_seconds']}s ago"
+                f"Bars: {stats['total_bars']} ({stats['bars_per_second']}/s), "
+                f"Quotes: {stats['total_quotes']} ({stats['quotes_per_second']}/s), "
+                f"Symbols: {stats['unique_symbols_bars']} bars, {stats['unique_symbols_quotes']} quotes, "
+                f"Last data: {stats['data_freshness_seconds']}s ago"
             )
         else:
+            freshness = stats["data_freshness_seconds"]
             logger.warning(
                 f"[HEARTBEAT] NO DATA RECEIVED - "
-                f"Last bar: {freshness['last_bar_age_seconds']}s ago" if freshness['last_bar_age_seconds'] else "Never"
+                f"Last data: {freshness}s ago" if freshness else "Never"
             )
 
         self._last_heartbeat = datetime.utcnow()
@@ -359,15 +351,20 @@ class Instrumentation:
         cutoff = datetime.utcnow() - timedelta(minutes=minutes)
         recent = [e for e in self._evaluations if e.timestamp >= cutoff]
 
-        by_strategy: dict[str, dict[str, int]] = defaultdict(lambda: {"accepted": 0, "rejected": 0, "skipped": 0})
+        by_strategy: dict[str, dict[str, int]] = defaultdict(lambda: {"total": 0, "accepted": 0, "rejected": 0})
         by_symbol: dict[str, int] = defaultdict(int)
 
         for e in recent:
-            by_strategy[e.strategy_name][e.decision] += 1
+            by_strategy[e.strategy_name]["total"] += 1
+            if e.decision == "accepted":
+                by_strategy[e.strategy_name]["accepted"] += 1
+            elif e.decision == "rejected":
+                by_strategy[e.strategy_name]["rejected"] += 1
             by_symbol[e.symbol] += 1
 
         total_accepted = sum(1 for e in recent if e.decision == "accepted")
         total_rejected = sum(1 for e in recent if e.decision == "rejected")
+        total_skipped = sum(1 for e in recent if e.decision == "skipped")
         total = len(recent)
 
         return {
@@ -375,11 +372,10 @@ class Instrumentation:
             "total_evaluations": total,
             "accepted": total_accepted,
             "rejected": total_rejected,
-            "acceptance_rate": round(total_accepted / total * 100, 1) if total > 0 else 0,
+            "skipped": total_skipped,
+            "acceptance_rate": round(total_accepted / total, 4) if total > 0 else 0,
             "by_strategy": dict(by_strategy),
-            "top_symbols_evaluated": dict(
-                sorted(by_symbol.items(), key=lambda x: x[1], reverse=True)[:10]
-            ),
+            "by_symbol": dict(by_symbol),
         }
 
     # -------------------------------------------------------------------------
