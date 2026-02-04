@@ -53,7 +53,7 @@ class OpeningRangeBreakout(BaseStrategy):
         "position_size_pct": TradingConstants.ORB_POSITION_SIZE_PCT,
         "max_positions": TradingConstants.ORB_MAX_POSITIONS,
         "allowed_symbols": list(TradingConstants.TIER_1_ASSETS),
-        "min_volume": 5_000,  # Per-bar volume (not daily)
+        "min_volume": 1_000,  # Per-bar volume (lowered for paper trading)
         "exit_time_hour": 15,
         "exit_time_minute": 45,
     }

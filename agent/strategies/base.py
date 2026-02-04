@@ -222,14 +222,16 @@ class BaseStrategy(ABC):
             return False, f"Price ${context.current_price} below minimum ${min_price}"
 
         # Check volume (per-bar volume, not daily)
-        min_volume = self.parameters.get("min_volume", 5_000)
+        # Lower threshold for paper trading to get more signal evaluations
+        min_volume = self.parameters.get("min_volume", 1_000)
         if context.volume < min_volume:
             return False, f"Volume {context.volume} below minimum {min_volume}"
 
         # Check bid-ask spread if available
+        # Allow wider spreads for paper trading (0.5% vs typical 0.1% for live)
         if context.bid and context.ask:
             spread_pct = float((context.ask - context.bid) / context.current_price) * 100
-            max_spread = self.parameters.get("max_spread_pct", 0.1)
+            max_spread = self.parameters.get("max_spread_pct", 0.5)
             if spread_pct > max_spread:
                 return False, f"Spread {spread_pct:.2f}% exceeds maximum {max_spread}%"
 

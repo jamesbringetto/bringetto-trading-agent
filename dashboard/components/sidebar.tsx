@@ -12,6 +12,7 @@ import {
   Activity,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { TimezoneSelector } from './timezone-selector';
 
 const navigation = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
@@ -61,6 +62,11 @@ export function Sidebar() {
           <AlertTriangle className="h-4 w-4" />
           Kill Switch
         </button>
+      </div>
+
+      {/* Timezone Selector */}
+      <div className="border-t px-4 py-3">
+        <TimezoneSelector />
       </div>
 
       {/* Legal Links */}

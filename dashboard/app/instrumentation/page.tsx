@@ -12,6 +12,7 @@ import {
   Database,
   RefreshCw,
 } from 'lucide-react';
+import { useTimezoneStore, formatTimeInTimezone, TIMEZONE_OPTIONS } from '@/lib/timezone-store';
 
 export default function InstrumentationPage() {
   const { data: status, isLoading, refetch, dataUpdatedAt } = useQuery({
@@ -103,10 +104,19 @@ export default function InstrumentationPage() {
       </section>
 
       {/* Last Updated */}
-      <p className="text-xs text-muted-foreground text-right">
-        Last updated: {new Date(dataUpdatedAt).toLocaleTimeString()}
-      </p>
+      <LastUpdatedFooter timestamp={dataUpdatedAt} />
     </div>
+  );
+}
+
+function LastUpdatedFooter({ timestamp }: { timestamp: number }) {
+  const { timezone } = useTimezoneStore();
+  const tzOption = TIMEZONE_OPTIONS.find((tz) => tz.value === timezone);
+
+  return (
+    <p className="text-xs text-muted-foreground text-right">
+      Last updated: {formatTimeInTimezone(new Date(timestamp))} {tzOption?.abbrev}
+    </p>
   );
 }
 
@@ -178,12 +188,12 @@ function DataReceptionCard({ stats }: { stats: DataReceptionStats }) {
           label="Data Window"
           value={
             stats.first_data_time
-              ? new Date(stats.first_data_time).toLocaleTimeString()
+              ? formatTimeInTimezone(stats.first_data_time)
               : 'N/A'
           }
           subValue={
             stats.last_data_time
-              ? new Date(stats.last_data_time).toLocaleTimeString()
+              ? formatTimeInTimezone(stats.last_data_time)
               : 'N/A'
           }
           subLabel="First / Last"
@@ -203,7 +213,7 @@ function EvaluationSummaryCard({ summary }: { summary: EvaluationSummary }) {
         <StatBox
           label="Total Evaluations"
           value={summary.total_evaluations.toLocaleString()}
-          subValue={`Last ${summary.time_window_minutes} min`}
+          subValue="Session total"
         />
         <StatBox
           label="Accepted"
@@ -282,7 +292,7 @@ function EvaluationsList({ evaluations }: { evaluations: StrategyEvaluation[] })
             {evaluations.map((evaluation) => (
               <tr key={evaluation.id} className="hover:bg-muted/30">
                 <td className="px-4 py-2 text-muted-foreground">
-                  {new Date(evaluation.timestamp).toLocaleTimeString()}
+                  {formatTimeInTimezone(evaluation.timestamp)}
                 </td>
                 <td className="px-4 py-2 font-medium">
                   {evaluation.strategy_name}
