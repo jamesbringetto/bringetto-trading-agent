@@ -137,6 +137,8 @@ class DataStreamer:
         """Handle incoming bar data."""
         self._last_data_time = datetime.now()
 
+        logger.debug(f"Received bar: {bar.symbol} @ {bar.close}")
+
         # Record data reception for instrumentation
         get_instrumentation().record_bar(bar.symbol)
 
@@ -264,14 +266,24 @@ class DataStreamer:
         self._should_reconnect = auto_reconnect
         self._reconnect_attempts = 0
 
+        logger.info(
+            f"DataStreamer connecting - Feed: {self._feed.value}, "
+            f"Bars: {len(self._subscribed_bars)}, Quotes: {len(self._subscribed_quotes)}"
+        )
+
         while True:
             try:
                 self._init_stream()
                 if self._stream is None:
+                    logger.error("Failed to initialize stream - stream is None")
                     return
 
                 self._is_running = True
-                logger.info("Starting data stream...")
+                logger.info(
+                    f"Data stream connecting to Alpaca WebSocket... "
+                    f"Subscriptions: bars={list(self._subscribed_bars)}, "
+                    f"quotes={list(self._subscribed_quotes)}"
+                )
 
                 # Notify reconnection if this is a retry
                 if self._reconnect_attempts > 0:
