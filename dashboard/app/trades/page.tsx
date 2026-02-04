@@ -3,12 +3,18 @@
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { formatCurrency } from '@/lib/utils';
-import { ArrowUpRight, ArrowDownRight } from 'lucide-react';
+import { ArrowUpRight, ArrowDownRight, Clock } from 'lucide-react';
+import { MarketStatusWidget } from '@/components/market-status';
 
 export default function TradesPage() {
   const { data: trades, isLoading } = useQuery({
     queryKey: ['allTrades'],
     queryFn: () => api.getTrades(100),
+  });
+
+  const { data: status } = useQuery({
+    queryKey: ['tradingStatus'],
+    queryFn: () => api.getTradingStatus(),
   });
 
   if (isLoading) {
@@ -26,11 +32,24 @@ export default function TradesPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Trade History</h1>
-        <p className="text-muted-foreground">
-          Complete history of all trades executed by the agent
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold">Trade History</h1>
+          <p className="text-muted-foreground">
+            Complete history of all trades executed by the agent
+          </p>
+        </div>
+        {/* Agent status indicator */}
+        <div className="flex items-center gap-2">
+          <div
+            className={`h-3 w-3 rounded-full ${
+              status?.is_running ? 'bg-green-500' : 'bg-red-500'
+            }`}
+          />
+          <span className="text-sm text-muted-foreground">
+            {status?.is_running ? 'Agent Active' : 'Agent Paused'}
+          </span>
+        </div>
       </div>
 
       <div className="rounded-lg border bg-card">
@@ -115,8 +134,24 @@ export default function TradesPage() {
         </div>
 
         {!trades?.length && (
-          <div className="p-8 text-center text-muted-foreground">
-            No trades yet. The agent will start trading during market hours.
+          <div className="p-8">
+            <div className="max-w-md mx-auto space-y-6">
+              {/* Market Status Widget */}
+              <MarketStatusWidget />
+
+              {/* No trades message */}
+              <div className="text-center space-y-2">
+                <div className="flex items-center justify-center gap-2 text-muted-foreground">
+                  <Clock className="h-5 w-5" />
+                  <span className="font-medium">No trades yet</span>
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  {status?.is_running
+                    ? "The agent is running and will execute trades when signals are generated during market hours."
+                    : "The agent is currently paused. Start the agent to begin trading."}
+                </p>
+              </div>
+            </div>
           </div>
         )}
       </div>
