@@ -1,7 +1,8 @@
 'use client';
 
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { api, DataReceptionStats, EvaluationSummary, StrategyEvaluation } from '@/lib/api';
+import { api, DataReceptionStats, EvaluationSummary, StrategyEvaluation, FunnelData, StrategyEvaluationStats } from '@/lib/api';
 import {
   Activity,
   BarChart3,
@@ -11,6 +12,12 @@ import {
   Zap,
   Database,
   RefreshCw,
+  ChevronDown,
+  ChevronRight,
+  TrendingUp,
+  TrendingDown,
+  AlertTriangle,
+  ArrowRight,
 } from 'lucide-react';
 import { useTimezoneStore, TIMEZONE_OPTIONS } from '@/lib/timezone-store';
 
@@ -69,6 +76,25 @@ export default function InstrumentationPage() {
         ) : (
           <div className="rounded-lg border bg-card p-6 text-center text-muted-foreground">
             No data reception stats available
+          </div>
+        )}
+      </section>
+
+      {/* Decision Funnel Section */}
+      <section>
+        <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+          <TrendingDown className="h-5 w-5" />
+          Decision Pipeline Funnel
+        </h2>
+        {status?.evaluations?.funnel ? (
+          <FunnelCard
+            funnel={status.evaluations.funnel}
+            riskBreakdown={status.evaluations.risk_rejection_breakdown}
+            totalEvaluations={status.evaluations.total_evaluations}
+          />
+        ) : (
+          <div className="rounded-lg border bg-card p-6 text-center text-muted-foreground">
+            No funnel data available
           </div>
         )}
       </section>
@@ -225,6 +251,7 @@ function DataReceptionCard({ stats }: { stats: DataReceptionStats }) {
 
 function EvaluationSummaryCard({ summary }: { summary: EvaluationSummary }) {
   const strategies = Object.entries(summary.by_strategy || {});
+  const [expandedStrategy, setExpandedStrategy] = useState<string | null>(null);
 
   return (
     <div className="rounded-lg border bg-card p-6">
@@ -256,30 +283,130 @@ function EvaluationSummaryCard({ summary }: { summary: EvaluationSummary }) {
       {strategies.length > 0 && (
         <div>
           <h3 className="text-sm font-medium text-muted-foreground mb-3">
-            By Strategy
+            By Strategy (click to expand funnel)
           </h3>
           <div className="space-y-2">
-            {strategies.map(([name, data]) => (
-              <div
-                key={name}
-                className="flex items-center justify-between rounded-lg bg-muted/50 px-4 py-2"
-              >
-                <span className="font-medium">{name}</span>
-                <div className="flex items-center gap-4 text-sm">
-                  <span className="text-muted-foreground">
-                    {data.total} total
-                  </span>
-                  <span className="text-green-600 flex items-center gap-1">
-                    <CheckCircle className="h-3 w-3" />
-                    {data.accepted}
-                  </span>
-                  <span className="text-red-600 flex items-center gap-1">
-                    <XCircle className="h-3 w-3" />
-                    {data.rejected}
-                  </span>
+            {strategies.map(([name, data]) => {
+              const isExpanded = expandedStrategy === name;
+              const funnel = data.funnel;
+              const riskBreakdown = data.risk_rejection_breakdown;
+
+              return (
+                <div key={name}>
+                  <button
+                    onClick={() => setExpandedStrategy(isExpanded ? null : name)}
+                    className="w-full flex items-center justify-between rounded-lg bg-muted/50 px-4 py-2 hover:bg-muted/70 transition-colors"
+                  >
+                    <div className="flex items-center gap-2">
+                      {isExpanded ? (
+                        <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                      ) : (
+                        <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                      )}
+                      <span className="font-medium">{name}</span>
+                    </div>
+                    <div className="flex items-center gap-4 text-sm">
+                      <span className="text-muted-foreground">
+                        {data.total.toLocaleString()} total
+                      </span>
+                      <span className="text-green-600 flex items-center gap-1">
+                        <CheckCircle className="h-3 w-3" />
+                        {data.accepted.toLocaleString()}
+                      </span>
+                      <span className="text-red-600 flex items-center gap-1">
+                        <XCircle className="h-3 w-3" />
+                        {data.rejected.toLocaleString()}
+                      </span>
+                    </div>
+                  </button>
+
+                  {/* Expanded Funnel View */}
+                  {isExpanded && funnel && (
+                    <div className="mt-2 ml-6 p-4 rounded-lg bg-muted/30 border border-muted">
+                      <div className="text-xs text-muted-foreground mb-3">Pipeline Progress</div>
+                      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-sm">
+                        <div className="text-center p-2 rounded bg-green-100">
+                          <p className="text-green-800 font-medium">{funnel.signal_generated}</p>
+                          <p className="text-green-700 text-xs">Signals</p>
+                        </div>
+                        <div className="flex items-center justify-center text-muted-foreground">
+                          <ArrowRight className="h-4 w-4" />
+                        </div>
+                        <div className="text-center p-2 rounded bg-teal-100">
+                          <p className="text-teal-800 font-medium">{funnel.orders_submitted}</p>
+                          <p className="text-teal-700 text-xs">Submitted</p>
+                        </div>
+                        <div className="flex items-center justify-center text-muted-foreground">
+                          <ArrowRight className="h-4 w-4" />
+                        </div>
+                        <div className="text-center p-2 rounded bg-cyan-100">
+                          <p className="text-cyan-800 font-medium">{funnel.orders_filled}</p>
+                          <p className="text-cyan-700 text-xs">Filled</p>
+                        </div>
+                      </div>
+
+                      {/* Blocked breakdown */}
+                      {(funnel.blocked_pdt > 0 || funnel.blocked_risk_validation > 0 || funnel.blocked_position_size > 0) && (
+                        <div className="mt-3 pt-3 border-t border-muted">
+                          <div className="text-xs text-muted-foreground mb-2">Blocked Signals</div>
+                          <div className="flex flex-wrap gap-2 text-xs">
+                            {funnel.blocked_pdt > 0 && (
+                              <span className="px-2 py-1 rounded bg-yellow-100 text-yellow-800">
+                                PDT: {funnel.blocked_pdt}
+                              </span>
+                            )}
+                            {funnel.blocked_risk_validation > 0 && (
+                              <span className="px-2 py-1 rounded bg-red-100 text-red-800">
+                                Risk: {funnel.blocked_risk_validation}
+                              </span>
+                            )}
+                            {funnel.blocked_position_size > 0 && (
+                              <span className="px-2 py-1 rounded bg-orange-100 text-orange-800">
+                                Size: {funnel.blocked_position_size}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Risk breakdown details */}
+                      {riskBreakdown && Object.keys(riskBreakdown).length > 0 && (
+                        <div className="mt-3 pt-3 border-t border-muted">
+                          <div className="text-xs text-muted-foreground mb-2">Risk Rejection Details</div>
+                          <div className="flex flex-wrap gap-2 text-xs">
+                            {Object.entries(riskBreakdown)
+                              .filter(([, v]) => v > 0)
+                              .map(([reason, count]) => (
+                                <span key={reason} className="px-2 py-1 rounded bg-red-50 text-red-700">
+                                  {reason.replace(/_/g, ' ')}: {count}
+                                </span>
+                              ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Trade outcomes */}
+                      {funnel.trades_closed > 0 && (
+                        <div className="mt-3 pt-3 border-t border-muted">
+                          <div className="text-xs text-muted-foreground mb-2">Trade Outcomes</div>
+                          <div className="flex gap-4 text-sm">
+                            <span className="text-green-600 font-medium">
+                              Won: {funnel.trades_won}
+                            </span>
+                            <span className="text-red-600 font-medium">
+                              Lost: {funnel.trades_lost}
+                            </span>
+                            <span className="text-muted-foreground">
+                              Win Rate: {(funnel.trades_won / funnel.trades_closed * 100).toFixed(1)}%
+                            </span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}
@@ -395,6 +522,143 @@ function StatBox({
       {subLabel && (
         <p className="text-xs text-muted-foreground">{subLabel}</p>
       )}
+    </div>
+  );
+}
+
+interface FunnelCardProps {
+  funnel: FunnelData;
+  riskBreakdown?: Record<string, number>;
+  totalEvaluations: number;
+}
+
+function FunnelCard({ funnel, riskBreakdown, totalEvaluations }: FunnelCardProps) {
+  const [showRiskBreakdown, setShowRiskBreakdown] = useState(false);
+
+  // Define funnel stages with their values
+  const stages = [
+    { label: 'Evaluated', value: totalEvaluations, color: 'bg-slate-500' },
+    { label: 'Data Available', value: totalEvaluations - (funnel.skipped_no_data || 0), color: 'bg-blue-500' },
+    { label: 'Signal Generated', value: funnel.signal_generated, color: 'bg-green-500' },
+    { label: 'Risk Validated', value: funnel.signal_generated - funnel.blocked_pdt - funnel.blocked_risk_validation - funnel.blocked_position_size, color: 'bg-emerald-500' },
+    { label: 'Order Submitted', value: funnel.orders_submitted, color: 'bg-teal-500' },
+    { label: 'Order Filled', value: funnel.orders_filled, color: 'bg-cyan-500' },
+    { label: 'Trade Closed', value: funnel.trades_closed, color: 'bg-purple-500' },
+  ];
+
+  // Filter to only show stages with data or their preceding stages
+  const maxStageWithValue = stages.reduce((max, stage, idx) => stage.value > 0 ? idx : max, 0);
+
+  // Calculate rejection summary
+  const rejectedAtData = funnel.skipped_no_data || 0;
+  const rejectedAtRisk = funnel.blocked_pdt + funnel.blocked_risk_validation + funnel.blocked_position_size;
+  const rejectedAtOrder = funnel.orders_failed;
+
+  return (
+    <div className="rounded-lg border bg-card p-6">
+      {/* Funnel Visualization */}
+      <div className="space-y-1 mb-6">
+        {stages.slice(0, maxStageWithValue + 2).map((stage, idx) => {
+          const prevValue = idx > 0 ? stages[idx - 1].value : stage.value;
+          const dropoff = prevValue > 0 ? ((prevValue - stage.value) / prevValue * 100) : 0;
+          const widthPct = stages[0].value > 0 ? Math.max(5, (stage.value / stages[0].value) * 100) : 5;
+
+          return (
+            <div key={stage.label} className="flex items-center gap-3">
+              <div className="w-32 text-sm text-right text-muted-foreground">
+                {stage.label}
+              </div>
+              <div className="flex-1 relative">
+                <div
+                  className={`h-8 ${stage.color} rounded flex items-center justify-end pr-3 transition-all duration-300`}
+                  style={{ width: `${widthPct}%` }}
+                >
+                  <span className="text-white text-sm font-medium">
+                    {stage.value.toLocaleString()}
+                  </span>
+                </div>
+              </div>
+              <div className="w-20 text-xs text-muted-foreground">
+                {idx > 0 && dropoff > 0 && (
+                  <span className="text-red-500">-{dropoff.toFixed(1)}%</span>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Outcome Summary */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 pt-4 border-t">
+        <div className="text-center">
+          <p className="text-sm text-muted-foreground">Open Positions</p>
+          <p className="text-xl font-bold">{funnel.orders_filled - funnel.trades_closed}</p>
+        </div>
+        <div className="text-center">
+          <p className="text-sm text-muted-foreground">Trades Won</p>
+          <p className="text-xl font-bold text-green-600">{funnel.trades_won}</p>
+        </div>
+        <div className="text-center">
+          <p className="text-sm text-muted-foreground">Trades Lost</p>
+          <p className="text-xl font-bold text-red-600">{funnel.trades_lost}</p>
+        </div>
+        <div className="text-center">
+          <p className="text-sm text-muted-foreground">Win Rate</p>
+          <p className={`text-xl font-bold ${funnel.trades_closed > 0 && funnel.trades_won / funnel.trades_closed >= 0.5 ? 'text-green-600' : 'text-muted-foreground'}`}>
+            {funnel.trades_closed > 0 ? `${(funnel.trades_won / funnel.trades_closed * 100).toFixed(1)}%` : '-'}
+          </p>
+        </div>
+      </div>
+
+      {/* Rejection Breakdown */}
+      <div className="mt-4 pt-4 border-t">
+        <button
+          onClick={() => setShowRiskBreakdown(!showRiskBreakdown)}
+          className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
+        >
+          {showRiskBreakdown ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+          <AlertTriangle className="h-4 w-4" />
+          Rejection Breakdown ({rejectedAtData + rejectedAtRisk + rejectedAtOrder} total blocked)
+        </button>
+
+        {showRiskBreakdown && (
+          <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+            <div className="rounded bg-muted/50 p-2">
+              <p className="text-muted-foreground">No Data</p>
+              <p className="font-medium">{(funnel.skipped_no_data || 0).toLocaleString()}</p>
+            </div>
+            <div className="rounded bg-muted/50 p-2">
+              <p className="text-muted-foreground">PDT Blocked</p>
+              <p className="font-medium">{funnel.blocked_pdt.toLocaleString()}</p>
+            </div>
+            <div className="rounded bg-muted/50 p-2">
+              <p className="text-muted-foreground">Risk Validation</p>
+              <p className="font-medium">{funnel.blocked_risk_validation.toLocaleString()}</p>
+            </div>
+            <div className="rounded bg-muted/50 p-2">
+              <p className="text-muted-foreground">Position Size</p>
+              <p className="font-medium">{funnel.blocked_position_size.toLocaleString()}</p>
+            </div>
+
+            {/* Risk validation sub-breakdown */}
+            {riskBreakdown && Object.entries(riskBreakdown).some(([, v]) => v > 0) && (
+              <>
+                <div className="col-span-full text-xs text-muted-foreground mt-2">
+                  Risk Validation Details:
+                </div>
+                {Object.entries(riskBreakdown)
+                  .filter(([, v]) => v > 0)
+                  .map(([reason, count]) => (
+                    <div key={reason} className="rounded bg-red-50 p-2">
+                      <p className="text-red-700 text-xs">{reason.replace(/_/g, ' ')}</p>
+                      <p className="font-medium text-red-800">{count.toLocaleString()}</p>
+                    </div>
+                  ))}
+              </>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

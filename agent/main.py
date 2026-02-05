@@ -190,8 +190,12 @@ class TradingAgent:
             return
 
         trade_id = trade_info.get("trade_id")
+        strategy_name = trade_info.get("strategy_name")
         if not trade_id:
             return
+
+        # Record entry fill in funnel
+        get_instrumentation().record_pipeline_event("orders_filled", strategy_name)
 
         try:
             with get_session() as session:
@@ -255,6 +259,14 @@ class TradingAgent:
                 f"Entry: ${entry_price} -> Exit: ${exit_price} | "
                 f"P&L: ${pnl:.2f} ({pnl_pct:.2f}%)"
             )
+
+            # Record funnel events for trade close
+            inst = get_instrumentation()
+            inst.record_pipeline_event("trades_closed", strategy.name)
+            if pnl > 0:
+                inst.record_pipeline_event("trades_won", strategy.name)
+            else:
+                inst.record_pipeline_event("trades_lost", strategy.name)
 
             # 1. Close the trade in the database
             trade_id = position_data.get("trade_id")
@@ -542,10 +554,13 @@ class TradingAgent:
         """
         symbols = self._get_trading_symbols()
         evaluated_count = 0
+        inst = get_instrumentation()
 
         for symbol in symbols:
             context = self._build_market_context(symbol)
             if context is None:
+                # Record skipped evaluation due to missing/stale data (aggregate only)
+                inst.record_pipeline_event("skipped_no_data")
                 continue
 
             # Evaluate each active strategy
@@ -667,6 +682,7 @@ class TradingAgent:
         pdt_status = self._broker.check_pdt_status()
         if pdt_status and not pdt_status.can_day_trade:
             logger.warning(f"PDT protection: {pdt_status.reason} - skipping {signal.symbol}")
+            get_instrumentation().record_pipeline_event("blocked_pdt", strategy.name)
             return False
 
         # Get current positions for validation
@@ -685,6 +701,9 @@ class TradingAgent:
 
         if not validation.is_valid:
             logger.warning(f"Signal validation failed for {signal.symbol}: {validation.reason}")
+            get_instrumentation().record_pipeline_event(
+                "blocked_risk_validation", strategy.name, validation.failure_code
+            )
             return False
 
         # Log warnings if any
@@ -700,6 +719,7 @@ class TradingAgent:
                 f"Position size too small for {signal.symbol}: "
                 f"${position_value:.2f} / ${signal.entry_price} = {shares} shares"
             )
+            get_instrumentation().record_pipeline_event("blocked_position_size", strategy.name)
             return False
 
         # Generate client_order_id for tracking: strategy_name-uuid (max 48 chars)
@@ -727,6 +747,9 @@ class TradingAgent:
                 f"Order submitted successfully: {signal.symbol} | "
                 f"Order ID: {result.order_id} | Status: {result.status.value}"
             )
+
+            # Record funnel event
+            get_instrumentation().record_pipeline_event("orders_submitted", strategy.name)
 
             # Record trade in database
             trade_id = self._record_trade_to_db(signal, strategy, shares, result.order_id)
@@ -756,6 +779,7 @@ class TradingAgent:
             return True
         else:
             logger.error(f"Order submission failed for {signal.symbol}: {result.message}")
+            get_instrumentation().record_pipeline_event("orders_failed", strategy.name)
             return False
 
     def _record_trade_to_db(

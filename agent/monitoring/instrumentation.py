@@ -94,7 +94,9 @@ class StrategyEvaluation:
                 "entry_price": str(self.entry_price) if self.entry_price else None,
                 "stop_loss": str(self.stop_loss) if self.stop_loss else None,
                 "take_profit": str(self.take_profit) if self.take_profit else None,
-            } if self.decision == "accepted" else None,
+            }
+            if self.decision == "accepted"
+            else None,
         }
 
 
@@ -127,6 +129,54 @@ class Instrumentation:
         self._total_skipped: int = 0
         self._by_strategy_cumulative: dict[str, dict[str, int]] = defaultdict(
             lambda: {"total": 0, "accepted": 0, "rejected": 0}
+        )
+
+        # Funnel counters (aggregate)
+        self._funnel: dict[str, int] = {
+            "skipped_no_data": 0,
+            "signal_generated": 0,  # Same as _total_accepted
+            "blocked_pdt": 0,
+            "blocked_risk_validation": 0,
+            "blocked_position_size": 0,
+            "orders_submitted": 0,
+            "orders_failed": 0,
+            "orders_filled": 0,
+            "trades_closed": 0,
+            "trades_won": 0,
+            "trades_lost": 0,
+        }
+
+        # Risk rejection breakdown (aggregate)
+        self._risk_rejection_breakdown: dict[str, int] = {
+            "market_hours": 0,
+            "no_stop_loss": 0,
+            "invalid_stop_loss": 0,
+            "position_size": 0,
+            "buying_power": 0,
+            "max_positions": 0,
+            "max_exposure": 0,
+            "min_price": 0,
+        }
+
+        # Per-strategy funnel counters
+        self._by_strategy_funnel: dict[str, dict[str, int]] = defaultdict(
+            lambda: {
+                "signal_generated": 0,
+                "blocked_pdt": 0,
+                "blocked_risk_validation": 0,
+                "blocked_position_size": 0,
+                "orders_submitted": 0,
+                "orders_failed": 0,
+                "orders_filled": 0,
+                "trades_closed": 0,
+                "trades_won": 0,
+                "trades_lost": 0,
+            }
+        )
+
+        # Per-strategy risk rejection breakdown
+        self._by_strategy_risk_breakdown: dict[str, dict[str, int]] = defaultdict(
+            lambda: defaultdict(int)
         )
 
         logger.info(
@@ -168,7 +218,9 @@ class Instrumentation:
         trades_per_second = stats.total_trades / runtime if runtime > 0 else 0
 
         # Data freshness - use the most recent data time
-        last_times = [t for t in [stats.last_bar_time, stats.last_quote_time, stats.last_trade_time] if t]
+        last_times = [
+            t for t in [stats.last_bar_time, stats.last_quote_time, stats.last_trade_time] if t
+        ]
         last_data_time = max(last_times) if last_times else None
         first_data_time = stats.start_time
         data_freshness = (now - last_data_time).total_seconds() if last_data_time else None
@@ -191,7 +243,9 @@ class Instrumentation:
     def log_heartbeat(self) -> None:
         """Log a heartbeat showing data reception status."""
         stats = self.get_data_stats()
-        is_receiving = stats["data_freshness_seconds"] is not None and stats["data_freshness_seconds"] < 120
+        is_receiving = (
+            stats["data_freshness_seconds"] is not None and stats["data_freshness_seconds"] < 120
+        )
 
         if is_receiving:
             logger.info(
@@ -204,8 +258,9 @@ class Instrumentation:
         else:
             freshness = stats["data_freshness_seconds"]
             logger.warning(
-                f"[HEARTBEAT] NO DATA RECEIVED - "
-                f"Last data: {freshness}s ago" if freshness else "Never"
+                f"[HEARTBEAT] NO DATA RECEIVED - Last data: {freshness}s ago"
+                if freshness
+                else "Never"
             )
 
         self._last_heartbeat = datetime.utcnow()
@@ -290,7 +345,7 @@ class Instrumentation:
         # Store in memory (with limit for recent evaluations display)
         self._evaluations.append(evaluation)
         if len(self._evaluations) > self._max_evaluations:
-            self._evaluations = self._evaluations[-self._max_evaluations:]
+            self._evaluations = self._evaluations[-self._max_evaluations :]
 
         # Update cumulative counters (unlimited)
         self._total_evaluations += 1
@@ -319,6 +374,67 @@ class Instrumentation:
             )
 
         return evaluation
+
+    def record_pipeline_event(
+        self,
+        stage: str,
+        strategy_name: str | None = None,
+        failure_code: str | None = None,
+    ) -> None:
+        """
+        Record a funnel pipeline event.
+
+        Args:
+            stage: The pipeline stage. Valid values:
+                - "skipped_no_data": Market context unavailable (aggregate only)
+                - "signal_generated": Strategy generated a signal
+                - "blocked_pdt": PDT rule prevented entry
+                - "blocked_risk_validation": Risk validation failed
+                - "blocked_position_size": Position size < 1 share
+                - "orders_submitted": Order submitted to broker
+                - "orders_failed": Order submission failed
+                - "orders_filled": Order filled (entry)
+                - "trades_closed": Trade closed (exit)
+                - "trades_won": Trade closed with profit
+                - "trades_lost": Trade closed with loss
+            strategy_name: Name of the strategy (None for aggregate-only events)
+            failure_code: For "blocked_risk_validation", the specific risk check that failed
+        """
+        # Update aggregate funnel counter
+        if stage in self._funnel:
+            self._funnel[stage] += 1
+
+        # Update per-strategy funnel counter (if strategy provided)
+        if strategy_name and stage != "skipped_no_data":
+            # Ensure the strategy entry exists with all keys
+            if strategy_name not in self._by_strategy_funnel:
+                self._by_strategy_funnel[strategy_name] = {
+                    "signal_generated": 0,
+                    "blocked_pdt": 0,
+                    "blocked_risk_validation": 0,
+                    "blocked_position_size": 0,
+                    "orders_submitted": 0,
+                    "orders_failed": 0,
+                    "orders_filled": 0,
+                    "trades_closed": 0,
+                    "trades_won": 0,
+                    "trades_lost": 0,
+                }
+            if stage in self._by_strategy_funnel[strategy_name]:
+                self._by_strategy_funnel[strategy_name][stage] += 1
+
+        # Update risk rejection breakdown
+        if stage == "blocked_risk_validation" and failure_code:
+            if failure_code in self._risk_rejection_breakdown:
+                self._risk_rejection_breakdown[failure_code] += 1
+
+            # Per-strategy risk breakdown
+            if strategy_name:
+                self._by_strategy_risk_breakdown[strategy_name][failure_code] += 1
+
+        # Log significant events
+        if stage in ("orders_submitted", "orders_filled", "trades_won", "trades_lost"):
+            logger.debug(f"[FUNNEL] {stage} | Strategy: {strategy_name or 'N/A'}")
 
     def get_evaluations(
         self,
@@ -382,6 +498,17 @@ class Instrumentation:
         recent_accepted = sum(1 for e in recent if e.decision == "accepted")
         recent_total = len(recent)
 
+        # Build per-strategy data with funnel and risk breakdown
+        by_strategy_full: dict[str, dict[str, Any]] = {}
+        for strategy_name, basic_stats in self._by_strategy_cumulative.items():
+            by_strategy_full[strategy_name] = {
+                **dict(basic_stats),  # total, accepted, rejected
+                "funnel": dict(self._by_strategy_funnel.get(strategy_name, {})),
+                "risk_rejection_breakdown": dict(
+                    self._by_strategy_risk_breakdown.get(strategy_name, {})
+                ),
+            }
+
         return {
             "time_window_minutes": minutes,
             # Use cumulative counters for totals (unlimited)
@@ -391,9 +518,12 @@ class Instrumentation:
             "skipped": self._total_skipped,
             # Acceptance rate based on recent window
             "acceptance_rate": round(recent_accepted / recent_total, 4) if recent_total > 0 else 0,
-            # Use cumulative strategy counters
-            "by_strategy": {k: dict(v) for k, v in self._by_strategy_cumulative.items()},
+            # Use cumulative strategy counters with funnel data
+            "by_strategy": by_strategy_full,
             "by_symbol": dict(by_symbol),
+            # Aggregate funnel data
+            "funnel": dict(self._funnel),
+            "risk_rejection_breakdown": dict(self._risk_rejection_breakdown),
         }
 
     # -------------------------------------------------------------------------
