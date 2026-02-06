@@ -7,6 +7,7 @@ from decimal import Decimal
 import pytz
 from loguru import logger
 
+from agent.api.state import get_agent_state
 from agent.config.constants import OrderSide, TradingConstants
 from agent.config.settings import get_settings
 from agent.strategies.base import StrategySignal
@@ -185,8 +186,12 @@ class TradeValidator:
                 failure_code="buying_power",
             )
 
-        # Check max concurrent positions
-        if current_positions >= self._settings.max_concurrent_positions:
+        # Check max concurrent positions (skip if trading limits disabled)
+        agent_state = get_agent_state()
+        if (
+            not agent_state.get("trading_limits_disabled", False)
+            and current_positions >= self._settings.max_concurrent_positions
+        ):
             return ValidationResult(
                 is_valid=False,
                 reason=f"Max concurrent positions ({self._settings.max_concurrent_positions}) reached",

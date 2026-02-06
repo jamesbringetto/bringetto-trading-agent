@@ -8,6 +8,7 @@ from pydantic import BaseModel
 
 from agent.api.auth import require_api_key
 from agent.api.state import get_agent_state, set_agent_state
+from agent.config.settings import get_settings
 
 # All endpoints in this router require API key authentication
 router = APIRouter(dependencies=[Depends(require_api_key)])
@@ -31,6 +32,7 @@ class TradingStatusResponse(BaseModel):
     circuit_breaker_active: bool
     current_session: str | None = None
     session_trading_enabled: bool | None = None
+    trading_limits_disabled: bool = False
 
 
 @router.post("/kill-switch", response_model=KillSwitchResponse)
@@ -124,6 +126,7 @@ async def get_trading_status() -> TradingStatusResponse:
         circuit_breaker_active=cb_active,
         current_session=current_session,
         session_trading_enabled=session_trading_enabled,
+        trading_limits_disabled=state.get("trading_limits_disabled", False),
     )
 
 
@@ -198,4 +201,58 @@ async def reset_circuit_breaker() -> dict[str, Any]:
         "success": True,
         "message": "Circuit breaker reset - trading limits restored",
         "warning": "Safety limits have been reset. Monitor closely.",
+    }
+
+
+class TradingLimitsToggleRequest(BaseModel):
+    """Request to toggle trading limits."""
+
+    disabled: bool
+
+
+@router.post("/trading-limits/toggle")
+async def toggle_trading_limits(request: TradingLimitsToggleRequest) -> dict[str, Any]:
+    """
+    Toggle trading limits (max positions and max trades per day).
+
+    When disabled, the open positions limit (10) and trades per day limit (30)
+    are bypassed. Only intended for paper trading mode.
+
+    WARNING: This removes position count and trade count guardrails.
+    Loss-based circuit breakers (daily/weekly/monthly) remain active.
+    """
+    settings = get_settings()
+
+    if settings.environment != "paper":
+        raise HTTPException(
+            status_code=400,
+            detail="Trading limits can only be disabled in paper trading mode",
+        )
+
+    set_agent_state("trading_limits_disabled", request.disabled)
+
+    action = "disabled" if request.disabled else "re-enabled"
+    logger.warning(f"Trading limits {action} via API (paper trading mode)")
+
+    return {
+        "success": True,
+        "trading_limits_disabled": request.disabled,
+        "message": f"Trading limits {action}",
+        "warning": "Position count and trade count limits are bypassed."
+        if request.disabled
+        else None,
+    }
+
+
+@router.get("/trading-limits/status")
+async def get_trading_limits_status() -> dict[str, Any]:
+    """Get current trading limits toggle status."""
+    state = get_agent_state()
+    settings = get_settings()
+
+    return {
+        "trading_limits_disabled": state.get("trading_limits_disabled", False),
+        "is_paper_trading": settings.environment == "paper",
+        "max_concurrent_positions": settings.max_concurrent_positions,
+        "max_trades_per_day": settings.max_trades_per_day,
     }

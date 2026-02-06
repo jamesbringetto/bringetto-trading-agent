@@ -52,6 +52,7 @@ export interface TradingStatus {
   circuit_breaker_active: boolean;
   current_session?: 'overnight' | 'pre_market' | 'regular' | 'after_hours' | null;
   session_trading_enabled?: boolean | null;
+  trading_limits_disabled: boolean;
 }
 
 export interface PortfolioSummary {
@@ -62,8 +63,9 @@ export interface PortfolioSummary {
   daily_pnl_pct: number;
   open_positions: number;
   trades_today: number;
-  max_positions: number;
-  max_trades: number;
+  max_positions: number | null;
+  max_trades: number | null;
+  trading_limits_disabled: boolean;
 }
 
 export interface DailySummary {
@@ -413,6 +415,7 @@ class ApiClient {
     const summary = await this.fetch<any>('/api/performance/summary');
     const equity = summary.account?.equity || 0;
     const dailyPnl = summary.today?.pnl || 0;
+    const limitsDisabled = summary.today?.trading_limits_disabled || false;
     return {
       account_value: equity,
       cash: summary.account?.cash || 0,
@@ -421,8 +424,9 @@ class ApiClient {
       daily_pnl_pct: equity > 0 ? (dailyPnl / equity) * 100 : 0,
       open_positions: summary.today?.open_positions || 0,
       trades_today: summary.today?.trades || 0,
-      max_positions: summary.today?.max_positions || 10,
-      max_trades: summary.today?.max_trades || 30,
+      max_positions: limitsDisabled ? null : (summary.today?.max_positions || 10),
+      max_trades: limitsDisabled ? null : (summary.today?.max_trades || 30),
+      trading_limits_disabled: limitsDisabled,
     };
   }
 
@@ -478,6 +482,13 @@ class ApiClient {
 
   async resetCircuitBreaker(): Promise<void> {
     await this.fetch('/api/controls/circuit-breaker/reset', { method: 'POST' });
+  }
+
+  async toggleTradingLimits(disabled: boolean): Promise<{ trading_limits_disabled: boolean }> {
+    return this.fetch('/api/controls/trading-limits/toggle', {
+      method: 'POST',
+      body: JSON.stringify({ disabled }),
+    });
   }
 
   // --------------------------------------------------------------------------

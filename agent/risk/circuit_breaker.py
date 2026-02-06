@@ -8,6 +8,7 @@ from decimal import Decimal
 import pytz
 from loguru import logger
 
+from agent.api.state import get_agent_state
 from agent.config.settings import get_settings
 
 
@@ -197,8 +198,12 @@ class CircuitBreaker:
             self._state.trigger_reason = "monthly_drawdown"
             return
 
-        # Check max trades per day
-        if self._state.trades_today >= self._settings.max_trades_per_day:
+        # Check max trades per day (skip if trading limits disabled)
+        state = get_agent_state()
+        if (
+            not state.get("trading_limits_disabled", False)
+            and self._state.trades_today >= self._settings.max_trades_per_day
+        ):
             self._trigger(
                 f"Max trades per day reached: {self._state.trades_today}",
             )
@@ -239,7 +244,11 @@ class CircuitBreaker:
         if self._state.is_triggered:
             return False, f"Circuit breaker active: {self._state.trigger_reason}"
 
-        if self._state.trades_today >= self._settings.max_trades_per_day:
+        state = get_agent_state()
+        if (
+            not state.get("trading_limits_disabled", False)
+            and self._state.trades_today >= self._settings.max_trades_per_day
+        ):
             return False, f"Max trades per day ({self._settings.max_trades_per_day}) reached"
 
         return True, "Trading allowed"
