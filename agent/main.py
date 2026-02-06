@@ -671,9 +671,12 @@ class TradingAgent:
         logger.info(f"Preloading historical 1-min bars for {len(symbols)} symbols...")
 
         now_et = self._get_market_time()
-        # Fetch 60 minutes of bars — enough for RSI(14), MACD(26), with room to spare.
-        # Not enough for MA50/MA200 but those will fill in from streaming.
-        lookback_minutes = 60
+        # Fetch bars back to at least 9:30 AM ET (market open) so we can bootstrap
+        # ORB opening ranges even if the agent started hours after the open.
+        # Minimum 60 minutes for RSI(14)/MACD(26) indicators.
+        market_open_today = now_et.replace(hour=9, minute=30, second=0, microsecond=0)
+        minutes_since_open = max(0, int((now_et - market_open_today).total_seconds() / 60))
+        lookback_minutes = max(60, minutes_since_open + 1)
         start_time = now_et - timedelta(minutes=lookback_minutes)
 
         BATCH_SIZE = 100  # Alpaca multi-symbol batch size
@@ -774,6 +777,13 @@ class TradingAgent:
                 logger.info(
                     f"ORB opening ranges bootstrapped from historical data: "
                     f"{orb_ranges_built} symbols"
+                )
+            else:
+                logger.warning(
+                    f"ORB opening ranges: 0 bootstrapped. "
+                    f"Lookback started at {start_time.strftime('%H:%M')} ET, "
+                    f"needed bars from 9:30-9:45 AM ET. "
+                    f"Allowed symbols: {len(strategy.parameters.get('allowed_symbols', []))}"
                 )
 
     async def _start_market_data_streaming(self) -> None:

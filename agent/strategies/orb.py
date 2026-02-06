@@ -152,10 +152,12 @@ class OpeningRangeBreakout(BaseStrategy):
 
         # Check if symbol is allowed
         if symbol not in self.parameters["allowed_symbols"]:
+            logger.debug(f"ORB | {symbol} | not in allowed_symbols")
             return None
 
         # Check if we're in trading period
         if not self._is_trading_period():
+            logger.debug(f"ORB | {symbol} | outside trading period")
             return None
 
         # Check if we already have a position
@@ -164,11 +166,13 @@ class OpeningRangeBreakout(BaseStrategy):
 
         # Check max positions
         if self.get_open_positions_count() >= self.parameters["max_positions"]:
+            logger.debug(f"ORB | {symbol} | max positions reached ({self.parameters['max_positions']})")
             return None
 
         # Get opening range
         opening_range = self.get_opening_range(symbol)
         if not opening_range or not opening_range.is_valid:
+            logger.debug(f"ORB | {symbol} | no opening range established")
             return None
 
         current_price = context.current_price
@@ -231,6 +235,13 @@ class OpeningRangeBreakout(BaseStrategy):
                 indicators=indicators,
             )
             logger.info(f"ORB SELL signal for {symbol} at ${current_price}")
+
+        if signal is None:
+            logger.debug(
+                f"ORB | {symbol} | price ${current_price} within range "
+                f"[${opening_range.low}, ${opening_range.high}] "
+                f"(need >{breakout_level} or <{breakdown_level})"
+            )
 
         return signal
 

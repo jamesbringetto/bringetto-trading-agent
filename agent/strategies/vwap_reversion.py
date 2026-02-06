@@ -105,6 +105,10 @@ class VWAPReversion(BaseStrategy):
 
         # Need VWAP and RSI for this strategy
         if context.vwap is None or context.rsi is None:
+            logger.debug(
+                f"VWAP | {symbol} | missing indicators "
+                f"(VWAP={'ok' if context.vwap else 'None'}, RSI={'ok' if context.rsi else 'None'})"
+            )
             return None
 
         current_price = context.current_price
@@ -174,6 +178,13 @@ class VWAPReversion(BaseStrategy):
             )
             logger.info(
                 f"VWAP SELL signal for {symbol} - deviation: {deviation:.2f}%, RSI: {rsi:.1f}"
+            )
+
+        if signal is None:
+            logger.debug(
+                f"VWAP | {symbol} | no signal: deviation={deviation:.2f}% "
+                f"(need >{deviation_threshold}%), RSI={rsi:.1f} "
+                f"(need <{self.parameters['rsi_oversold']} or >{self.parameters['rsi_overbought']})"
             )
 
         if signal:
