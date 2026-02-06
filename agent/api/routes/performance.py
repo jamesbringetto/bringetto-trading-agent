@@ -5,10 +5,13 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
+from sqlalchemy import and_, func, select
 
 from agent.api.auth import require_api_key
 from agent.api.state import get_agent_state
+from agent.config.constants import TradeStatus
 from agent.database import get_session
+from agent.database.models import Trade
 from agent.database.repositories import (
     DailySummaryRepository,
     StrategyPerformanceRepository,
@@ -183,20 +186,19 @@ async def get_strategy_performance() -> list[StrategyPerformanceResponse]:
     except Exception:
         pass
 
-    # Try to get performance data from database
+    # Compute performance data from trades table directly
     strategy_performance: dict[str, dict] = {}
     db_strategy_list: list[Any] = []
     try:
         with get_session() as session:
             perf_repo = StrategyPerformanceRepository(session)
             strat_repo = StrategyRepository(session)
-            trade_repo = TradeRepository(session)
             today = datetime.utcnow()
-            today_start = today.replace(hour=0, minute=0, second=0, microsecond=0)
 
             db_strategies = strat_repo.get_all()
 
             for s in db_strategies:
+                # First try the StrategyPerformance table (pre-computed metrics)
                 perf = perf_repo.get_for_date(s.id, today)
                 if perf:
                     strategy_performance[s.name] = {
@@ -207,16 +209,66 @@ async def get_strategy_performance() -> list[StrategyPerformanceResponse]:
                             float(perf.profit_factor) if perf.profit_factor else None
                         ),
                     }
-                else:
-                    # Fall back to counting trades from the trades table
-                    trade_count = trade_repo.get_trade_count(strategy_id=s.id, since=today_start)
-                    if trade_count > 0:
-                        strategy_performance[s.name] = {
-                            "trades_today": trade_count,
-                            "win_rate": None,
-                            "pnl_today": strategy_unrealized_pnl.get(s.name, 0),
-                            "profit_factor": None,
-                        }
+                    continue
+
+                # Fall back: compute metrics directly from trades table
+                trade_stats = session.execute(
+                    select(
+                        func.count(Trade.id).label("total_trades"),
+                        func.sum(func.case((Trade.pnl > 0, 1), else_=0)).label("winning_trades"),
+                        func.sum(func.case((Trade.pnl < 0, 1), else_=0)).label("losing_trades"),
+                        func.sum(
+                            func.case(
+                                (Trade.status == TradeStatus.CLOSED, Trade.pnl),
+                                else_=0,
+                            )
+                        ).label("realized_pnl"),
+                        func.sum(func.case((Trade.pnl > 0, Trade.pnl), else_=0)).label(
+                            "gross_profit"
+                        ),
+                        func.sum(func.case((Trade.pnl < 0, func.abs(Trade.pnl)), else_=0)).label(
+                            "gross_loss"
+                        ),
+                    ).where(Trade.strategy_id == s.id)
+                ).first()
+
+                total_trades = trade_stats.total_trades if trade_stats else 0
+
+                # Also count open trades for this strategy
+                open_count = (
+                    session.execute(
+                        select(func.count(Trade.id)).where(
+                            and_(
+                                Trade.strategy_id == s.id,
+                                Trade.status == TradeStatus.OPEN,
+                            )
+                        )
+                    ).scalar()
+                    or 0
+                )
+
+                if total_trades > 0 or open_count > 0:
+                    closed_count = total_trades - open_count
+                    win_rate = None
+                    if closed_count > 0 and trade_stats:
+                        winning = trade_stats.winning_trades or 0
+                        win_rate = float(winning / closed_count * 100)
+
+                    profit_factor = None
+                    if trade_stats and trade_stats.gross_loss and trade_stats.gross_loss > 0:
+                        profit_factor = float(
+                            (trade_stats.gross_profit or 0) / trade_stats.gross_loss
+                        )
+
+                    realized_pnl = float(trade_stats.realized_pnl or 0) if trade_stats else 0
+                    unrealized_pnl = strategy_unrealized_pnl.get(s.name, 0)
+
+                    strategy_performance[s.name] = {
+                        "trades_today": total_trades,
+                        "win_rate": win_rate,
+                        "pnl_today": realized_pnl + unrealized_pnl,
+                        "profit_factor": profit_factor,
+                    }
 
             # If no in-memory strategies, use DB strategies as source
             if not strategies:
