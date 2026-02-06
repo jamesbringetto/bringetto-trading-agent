@@ -300,6 +300,9 @@ export interface InstrumentationStatus {
   recent_accepted_signals: StrategyEvaluation[];
 }
 
+// Valid time range values for instrumentation queries
+export type InstrumentationTimeRange = 'session' | '1d' | '7d' | '30d';
+
 // ============================================================================
 // API Client
 // ============================================================================
@@ -540,12 +543,20 @@ class ApiClient {
   // Instrumentation
   // --------------------------------------------------------------------------
 
-  async getInstrumentationStatus(): Promise<InstrumentationStatus> {
-    return this.fetch<InstrumentationStatus>('/api/instrumentation/');
+  async getInstrumentationStatus(
+    timeRange: InstrumentationTimeRange = 'session'
+  ): Promise<InstrumentationStatus> {
+    return this.fetch<InstrumentationStatus>(
+      `/api/instrumentation/?time_range=${timeRange}`
+    );
   }
 
-  async getDataReceptionStats(): Promise<DataReceptionStats> {
-    return this.fetch<DataReceptionStats>('/api/instrumentation/data-reception');
+  async getDataReceptionStats(
+    timeRange: InstrumentationTimeRange = 'session'
+  ): Promise<DataReceptionStats> {
+    return this.fetch<DataReceptionStats>(
+      `/api/instrumentation/data-reception?time_range=${timeRange}`
+    );
   }
 
   async getEvaluations(
@@ -565,8 +576,13 @@ class ApiClient {
     return this.fetch<StrategyEvaluation[]>(`/api/instrumentation/evaluations?${params}`);
   }
 
-  async getEvaluationSummary(minutes: number = 60): Promise<EvaluationSummary> {
-    return this.fetch<EvaluationSummary>(`/api/instrumentation/evaluations/summary?minutes=${minutes}`);
+  async getEvaluationSummary(
+    minutes: number = 60,
+    timeRange: InstrumentationTimeRange = 'session'
+  ): Promise<EvaluationSummary> {
+    return this.fetch<EvaluationSummary>(
+      `/api/instrumentation/evaluations/summary?minutes=${minutes}&time_range=${timeRange}`
+    );
   }
 }
 

@@ -461,3 +461,51 @@ class AccountSnapshot(Base):
 
     def __repr__(self) -> str:
         return f"<AccountSnapshot(date={self.date}, equity={self.equity})>"
+
+
+class InstrumentationSnapshot(Base):
+    """Periodic snapshot of instrumentation counter deltas.
+
+    Stores the change in all instrumentation counters since the previous
+    snapshot. This allows reconstructing totals over any time window by
+    summing deltas, and survives agent/dashboard redeployments.
+    """
+
+    __tablename__ = "instrumentation_snapshots"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    timestamp = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    period_start = Column(DateTime(timezone=True), nullable=False)
+    period_end = Column(DateTime(timezone=True), nullable=False)
+
+    # Data reception deltas
+    bars_received = Column(Integer, default=0, nullable=False)
+    quotes_received = Column(Integer, default=0, nullable=False)
+    trades_received = Column(Integer, default=0, nullable=False)
+
+    # Evaluation count deltas
+    total_evaluations = Column(Integer, default=0, nullable=False)
+    accepted = Column(Integer, default=0, nullable=False)
+    rejected = Column(Integer, default=0, nullable=False)
+    skipped = Column(Integer, default=0, nullable=False)
+
+    # Funnel stage deltas (JSONB for flexibility)
+    funnel = Column(JSONB, nullable=False, default=dict)
+
+    # Risk rejection breakdown deltas
+    risk_rejection_breakdown = Column(JSONB, nullable=False, default=dict)
+
+    # Per-strategy evaluation and funnel deltas
+    by_strategy = Column(JSONB, nullable=False, default=dict)
+
+    __table_args__ = (
+        Index("ix_instrumentation_snapshots_timestamp", "timestamp"),
+        Index("ix_instrumentation_snapshots_period", "period_start", "period_end"),
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<InstrumentationSnapshot("
+            f"period={self.period_start} to {self.period_end}, "
+            f"evals={self.total_evaluations})>"
+        )
