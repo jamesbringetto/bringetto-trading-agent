@@ -34,7 +34,7 @@ from agent.config.constants import (
 from agent.config.settings import get_settings
 from agent.data.connection_manager import get_connection_manager
 from agent.data.indicators import IndicatorCalculator
-from agent.data.streaming import BarData, DataStreamer, QuoteData
+from agent.data.streaming import MAX_SUBSCRIBED_SYMBOLS, BarData, DataStreamer, QuoteData
 from agent.data.symbol_scanner import SymbolScanner
 from agent.database import get_session
 from agent.database.repositories import (
@@ -652,11 +652,21 @@ class TradingAgent:
         """
         Start market data streaming for all trading symbols.
 
-        Subscribes to bars and quotes for TIER_1 and TIER_2 assets.
+        Subscribes to bars and quotes for the trading universe, capped at the
+        WebSocket subscription limit (MAX_SUBSCRIBED_SYMBOLS).
         """
         logger.info("Starting market data streaming...")
 
         symbols = self._get_trading_symbols()
+
+        # Cap to streaming limit so we don't silently drop symbols
+        if len(symbols) > MAX_SUBSCRIBED_SYMBOLS:
+            logger.warning(
+                f"Trading universe ({len(symbols)} symbols) exceeds streaming cap "
+                f"({MAX_SUBSCRIBED_SYMBOLS}). Only the first {MAX_SUBSCRIBED_SYMBOLS} "
+                f"will receive real-time data."
+            )
+            symbols = symbols[:MAX_SUBSCRIBED_SYMBOLS]
 
         # Initialize data streamer
         self._data_streamer = DataStreamer()
@@ -1212,6 +1222,13 @@ class TradingAgent:
                 strategy.parameters["allowed_symbols"] = list(self._scanned_symbols)
 
             self._last_rescan_time = datetime.now(self._et_tz)
+
+            if len(self._scanned_symbols) > MAX_SUBSCRIBED_SYMBOLS:
+                logger.warning(
+                    f"Scanner returned {len(self._scanned_symbols)} symbols but "
+                    f"streaming cap is {MAX_SUBSCRIBED_SYMBOLS}. Consider lowering "
+                    f"SCANNER_MAX_SYMBOLS to {MAX_SUBSCRIBED_SYMBOLS}."
+                )
 
             logger.info(
                 f"Symbol scan complete: {len(self._scanned_symbols)} symbols "
