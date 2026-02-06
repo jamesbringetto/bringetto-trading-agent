@@ -269,6 +269,7 @@ export interface RiskRejectionBreakdown {
   max_positions: number;
   max_exposure: number;
   min_price: number;
+  [key: string]: number;  // Index signature for Record<string, number> compatibility
 }
 
 export interface StrategyEvaluationStats {
