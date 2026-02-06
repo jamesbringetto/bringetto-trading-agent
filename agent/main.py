@@ -34,6 +34,7 @@ from agent.config.constants import (
 from agent.config.settings import get_settings
 from agent.data.indicators import IndicatorCalculator
 from agent.data.streaming import BarData, DataStreamer, QuoteData
+from agent.data.symbol_scanner import SymbolScanner
 from agent.database import get_session
 from agent.database.repositories import (
     StrategyRepository,
@@ -93,6 +94,11 @@ class TradingAgent:
         self._data_streamer: DataStreamer | None = None
         self._streaming_task: asyncio.Task | None = None
         self._data_streaming_task: asyncio.Task | None = None
+
+        # Dynamic symbol scanner
+        self._scanner: SymbolScanner | None = None
+        self._scanned_symbols: list[str] = []
+        self._last_rescan_time: datetime | None = None
 
         # Market data cache - stores latest data per symbol
         self._latest_bars: dict[str, BarData] = {}
@@ -406,8 +412,9 @@ class TradingAgent:
         """
         Get all symbols that strategies want to trade.
 
-        Dynamically collects symbols from each strategy's allowed_symbols parameter.
-        Falls back to TIER_1 + TIER_2 assets if no strategies define symbols.
+        Uses scanner results if available. Collects from each strategy's
+        allowed_symbols parameter. Falls back to TIER_1 + TIER_2 assets
+        if no strategies define symbols and no scan has run.
         """
         symbols: set[str] = set()
 
@@ -415,11 +422,11 @@ class TradingAgent:
             allowed = strategy.parameters.get("allowed_symbols", [])
             symbols.update(allowed)
 
-        # Fallback if no strategies define symbols
+        # Fallback if no strategies define symbols (scanner hasn't run yet)
         if not symbols:
             symbols = set(TradingConstants.TIER_1_ASSETS + TradingConstants.TIER_2_ASSETS)
 
-        logger.info(f"Trading symbols from {len(self._strategies)} strategies: {sorted(symbols)}")
+        logger.debug(f"Trading {len(symbols)} symbols from {len(self._strategies)} strategies")
         return list(symbols)
 
     def _on_bar_data(self, bar: BarData) -> None:
@@ -518,8 +525,7 @@ class TradingAgent:
 
         # Start streaming in background task with error handling
         self._data_streaming_task = asyncio.create_task(
-            self._run_data_streaming(),
-            name="data_streaming"
+            self._run_data_streaming(), name="data_streaming"
         )
 
         logger.info(f"Market data streaming started for {len(symbols)} symbols")
@@ -1023,6 +1029,143 @@ class TradingAgent:
         # TODO: Close all positions if severe
 
     # =========================================================================
+    # Dynamic Symbol Scanner Methods
+    # =========================================================================
+
+    def _run_symbol_scan(self) -> None:
+        """
+        Run the dynamic symbol scanner and push results to strategies.
+
+        When the scanner is enabled, this replaces the hardcoded SP500_ASSETS list
+        by querying Alpaca for all active US equities and filtering by liquidity.
+        Falls back to SP500_ASSETS if the scanner is disabled or fails.
+        """
+        if not self._settings.enable_symbol_scanner:
+            logger.info("Symbol scanner disabled — using SP500_ASSETS fallback")
+            self._push_fallback_symbols()
+            return
+
+        if self._scanner is None:
+            self._scanner = SymbolScanner()
+
+        try:
+            result = self._scanner.scan()
+            self._scanned_symbols = result.all_qualified
+
+            if not self._scanned_symbols:
+                logger.warning("Scanner returned no symbols — using SP500_ASSETS fallback")
+                self._push_fallback_symbols()
+                return
+
+            # Push scanned symbols to all strategies
+            for strategy in self._strategies:
+                strategy.parameters["allowed_symbols"] = list(self._scanned_symbols)
+
+            self._last_rescan_time = datetime.now(self._et_tz)
+
+            logger.info(
+                f"Symbol scan complete: {len(self._scanned_symbols)} symbols "
+                f"pushed to {len(self._strategies)} strategies"
+            )
+
+        except Exception as e:
+            logger.error(f"Symbol scan failed: {e} — using SP500_ASSETS fallback")
+            self._push_fallback_symbols()
+
+    def _push_fallback_symbols(self) -> None:
+        """Push the hardcoded SP500_ASSETS to all strategies as a fallback."""
+        fallback = list(TradingConstants.SP500_ASSETS)
+        for strategy in self._strategies:
+            if not strategy.parameters.get("allowed_symbols"):
+                strategy.parameters["allowed_symbols"] = fallback
+        self._scanned_symbols = fallback
+        logger.info(f"Fallback: {len(fallback)} SP500 symbols pushed to strategies")
+
+    def _run_intraday_rescan(self) -> None:
+        """
+        Run intraday rescans for gap and momentum candidates.
+
+        Discovers new symbols that meet gap/momentum criteria and
+        dynamically subscribes to their streaming data. Only adds
+        new symbols — never removes existing ones mid-session.
+        """
+        if not self._settings.enable_symbol_scanner or self._scanner is None:
+            return
+
+        if self._scanner.last_scan is None:
+            return
+
+        new_symbols: set[str] = set()
+
+        # Scan for pre-market gaps
+        try:
+            gap_candidates = self._scanner.scan_premarket_gaps(
+                min_gap_pct=TradingConstants.GAP_MIN_PCT,
+                min_price=10.0,
+            )
+            gap_symbols = [g["symbol"] for g in gap_candidates]
+            new_symbols.update(gap_symbols)
+
+            # Push gap candidates to Gap and Go strategy
+            for strategy in self._strategies:
+                if strategy.name == "Gap and Go" and strategy.is_active:
+                    current = set(strategy.parameters.get("allowed_symbols", []))
+                    current.update(gap_symbols)
+                    strategy.parameters["allowed_symbols"] = list(current)
+
+        except Exception as e:
+            logger.warning(f"Gap rescan failed: {e}")
+
+        # Scan for momentum candidates
+        try:
+            momentum_candidates = self._scanner.scan_momentum_candidates(
+                min_price=10.0,
+                min_volume=2_000_000,
+            )
+            momentum_symbols = [m["symbol"] for m in momentum_candidates]
+            new_symbols.update(momentum_symbols)
+
+            # Push momentum candidates to Momentum Scalp strategy
+            for strategy in self._strategies:
+                if strategy.name == "Momentum Scalp" and strategy.is_active:
+                    current = set(strategy.parameters.get("allowed_symbols", []))
+                    current.update(momentum_symbols)
+                    strategy.parameters["allowed_symbols"] = list(current)
+
+        except Exception as e:
+            logger.warning(f"Momentum rescan failed: {e}")
+
+        # Subscribe to streaming data for any newly discovered symbols
+        if new_symbols and self._data_streamer:
+            existing = set(self._get_trading_symbols())
+            truly_new = new_symbols - existing
+            if truly_new:
+                logger.info(f"Intraday rescan found {len(truly_new)} new symbols to subscribe")
+                asyncio.create_task(self._subscribe_new_symbols(list(truly_new)))
+
+        self._last_rescan_time = datetime.now(self._et_tz)
+
+    async def _subscribe_new_symbols(self, symbols: list[str]) -> None:
+        """Subscribe to streaming data for newly discovered symbols."""
+        if not self._data_streamer:
+            return
+        try:
+            await self._data_streamer.subscribe_bars(symbols)
+            await self._data_streamer.subscribe_quotes(symbols)
+            logger.info(f"Subscribed to {len(symbols)} new symbols from intraday rescan")
+        except Exception as e:
+            logger.error(f"Failed to subscribe new symbols: {e}")
+
+    def _should_rescan(self) -> bool:
+        """Check if it's time for an intraday rescan."""
+        if not self._settings.enable_symbol_scanner:
+            return False
+        if self._last_rescan_time is None:
+            return True
+        elapsed = (datetime.now(self._et_tz) - self._last_rescan_time).total_seconds()
+        return elapsed >= self._settings.scanner_rescan_interval_minutes * 60
+
+    # =========================================================================
     # 24/5 Trading Methods
     # =========================================================================
 
@@ -1267,6 +1410,9 @@ class TradingAgent:
         # Clear stale order-trade mappings
         self._order_trade_map.clear()
 
+        # Re-run symbol scan for the new trading day
+        self._run_symbol_scan()
+
         logger.info("Daily reset complete")
 
     def _should_close_eod_positions(self) -> bool:
@@ -1404,10 +1550,13 @@ class TradingAgent:
         # Sync existing positions from broker on startup
         self._sync_positions_on_startup()
 
+        # Run initial symbol scan to discover tradeable universe
+        self._run_symbol_scan()
+
         # Start WebSocket streaming for trade updates
         await self._start_streaming()
 
-        # Start market data streaming
+        # Start market data streaming (uses scanner results)
         await self._start_market_data_streaming()
 
         # Start instrumentation heartbeat for data reception monitoring
@@ -1476,6 +1625,10 @@ class TradingAgent:
                         now_et = self._get_market_time()
                         if now_et.hour < 10:
                             eod_closed_today = False
+
+                        # Run intraday rescan if enough time has passed
+                        if self._should_rescan():
+                            self._run_intraday_rescan()
 
                         # Evaluate strategies against current market data
                         # This will:
@@ -1562,6 +1715,13 @@ async def main() -> None:
     logger.info(f"  Extended Hours (4AM-8PM ET): {settings.enable_extended_hours}")
     logger.info(f"  Overnight Trading (8PM-4AM ET): {settings.enable_overnight_trading}")
     logger.info("  Trading Window: Sunday 8 PM ET - Friday 8 PM ET")
+    logger.info("-" * 60)
+    logger.info("Symbol Scanner Configuration:")
+    logger.info(f"  Enabled: {settings.enable_symbol_scanner}")
+    logger.info(f"  Min Price: ${settings.scanner_min_price}")
+    logger.info(f"  Min Avg Volume: {settings.scanner_min_avg_volume:,}")
+    logger.info(f"  Max Symbols: {settings.scanner_max_symbols}")
+    logger.info(f"  Rescan Interval: {settings.scanner_rescan_interval_minutes} min")
     logger.info("=" * 60)
 
     # Create and run agent
