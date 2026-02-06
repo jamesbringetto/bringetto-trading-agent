@@ -62,6 +62,8 @@ export interface PortfolioSummary {
   daily_pnl_pct: number;
   open_positions: number;
   trades_today: number;
+  max_positions: number;
+  max_trades: number;
 }
 
 export interface DailySummary {
@@ -419,6 +421,8 @@ class ApiClient {
       daily_pnl_pct: equity > 0 ? (dailyPnl / equity) * 100 : 0,
       open_positions: summary.today?.open_positions || 0,
       trades_today: summary.today?.trades || 0,
+      max_positions: summary.today?.max_positions || 10,
+      max_trades: summary.today?.max_trades || 30,
     };
   }
 
