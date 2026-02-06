@@ -6,6 +6,15 @@ Compliance Notes:
 - Per Alpaca's terms, we must monitor for connectivity issues
 - Automatic reconnection is implemented with exponential backoff
 - All connection errors are logged for compliance reporting
+
+Connection-Limit Handling:
+- Alpaca free/paper tier allows only 1 concurrent connection per stream type.
+- When a connection drops, the server-side socket can linger for 60-120+ seconds.
+- The SDK's internal ``_run_forever`` retries create additional connections that
+  count against the limit, making rapid reconnection counterproductive.
+- We use the ``ConnectionManager`` singleton to enforce escalating cooldowns
+  (120 s → 240 s → 480 s → …) for "connection limit exceeded" errors, and
+  connection-limit failures are NOT counted toward the max-reconnect cap.
 """
 
 import asyncio
@@ -22,16 +31,18 @@ from alpaca.data.models import Bar, Quote, Trade
 from loguru import logger
 
 from agent.config.settings import get_settings
+from agent.data.connection_manager import (
+    StreamType,
+    get_connection_manager,
+)
 from agent.monitoring.instrumentation import get_instrumentation
 
-# Reconnection configuration
-MAX_RECONNECT_ATTEMPTS = 10
-INITIAL_RECONNECT_DELAY = 1.0  # seconds
+# Reconnection configuration for NON-connection-limit errors.
+# Connection-limit backoff is managed by ConnectionManager with much longer
+# delays (see agent/data/connection_manager.py).
+MAX_RECONNECT_ATTEMPTS = 20  # only counts non-connection-limit failures
+INITIAL_RECONNECT_DELAY = 2.0  # seconds
 MAX_RECONNECT_DELAY = 60.0  # seconds
-# When Alpaca returns "connection limit exceeded", old connections haven't
-# expired on their side yet.  Use a longer floor delay to avoid a hot retry
-# loop that will never succeed.
-CONNECTION_LIMIT_BACKOFF = 30.0  # seconds
 MAX_SUBSCRIBED_SYMBOLS = 500  # cap per-type to avoid stream overload
 
 
@@ -319,6 +330,14 @@ class DataStreamer:
         Per Alpaca's terms of service, we must monitor for connectivity issues
         and implement automatic reconnection.
 
+        Connection-limit errors ("connection limit exceeded", HTTP 429) are
+        handled specially:
+        - They are NOT counted toward ``MAX_RECONNECT_ATTEMPTS`` because they
+          are a transient server-side condition that will resolve on its own.
+        - The ``ConnectionManager`` singleton enforces escalating cooldowns
+          (120 s, 240 s, 480 s, …) so the agent does not hammer the limit.
+        - Only non-connection-limit failures increment the retry counter.
+
         Args:
             auto_reconnect: Whether to automatically reconnect on disconnect
         """
@@ -328,6 +347,8 @@ class DataStreamer:
 
         self._should_reconnect = auto_reconnect
         self._reconnect_attempts = 0
+        conn_mgr = get_connection_manager()
+        is_first_attempt = True
 
         logger.info(
             f"DataStreamer connecting - Feed: {self._feed.value}, "
@@ -336,6 +357,11 @@ class DataStreamer:
 
         while True:
             try:
+                # Ask the ConnectionManager for clearance before connecting.
+                # This enforces cooldowns after connection-limit errors and
+                # serialises connection attempts across stream types.
+                await conn_mgr.wait_for_clearance(StreamType.STOCK_DATA)
+
                 self._init_stream()
                 if self._stream is None:
                     logger.error("Failed to initialize stream - stream is None")
@@ -344,25 +370,34 @@ class DataStreamer:
                 self._is_running = True
                 logger.info(
                     f"Data stream connecting to Alpaca WebSocket... "
-                    f"Subscriptions: bars={list(self._subscribed_bars)}, "
-                    f"quotes={list(self._subscribed_quotes)}"
+                    f"Subscriptions: bars={len(self._subscribed_bars)}, "
+                    f"quotes={len(self._subscribed_quotes)}"
                 )
 
-                # Notify reconnection if this is a retry
-                if self._reconnect_attempts > 0:
+                # Notify reconnection if this is a retry (not first attempt)
+                if not is_first_attempt:
                     for callback in self._on_reconnect_callbacks:
                         try:
                             callback()
                         except Exception as e:
                             logger.error(f"Error in reconnect callback: {e}")
-                    self._reconnect_attempts = 0
 
+                is_first_attempt = False
                 await self._stream._run_forever()
+
+                # If _run_forever returns normally, the connection succeeded
+                # at some point. Reset retry counter.
+                conn_mgr.record_connected(StreamType.STOCK_DATA)
+                self._reconnect_attempts = 0
 
             except Exception as e:
                 self._is_running = False
                 error_msg = str(e)
                 logger.error(f"Data stream disconnected: {error_msg}")
+
+                # Immediately close the old stream to release the socket.
+                await self._close_stream()
+                conn_mgr.record_disconnected(StreamType.STOCK_DATA)
 
                 # Notify disconnect callbacks
                 for callback in self._on_disconnect_callbacks:
@@ -374,33 +409,41 @@ class DataStreamer:
                 if not self._should_reconnect:
                     raise
 
-                if self._reconnect_attempts >= MAX_RECONNECT_ATTEMPTS:
-                    logger.error(f"Max reconnection attempts ({MAX_RECONNECT_ATTEMPTS}) reached")
-                    raise
+                # Detect "connection limit exceeded" or HTTP 429
+                is_connection_limit = "connection limit" in error_msg.lower() or "429" in error_msg
 
-                # Detect "connection limit exceeded" — old connections haven't
-                # expired on Alpaca's side, so use a longer floor delay.
-                is_connection_limit = "connection limit" in error_msg.lower()
-
-                # Calculate backoff delay with exponential increase
-                delay = min(
-                    INITIAL_RECONNECT_DELAY * (2**self._reconnect_attempts), MAX_RECONNECT_DELAY
-                )
                 if is_connection_limit:
-                    delay = max(delay, CONNECTION_LIMIT_BACKOFF)
+                    # Connection-limit errors are NOT counted toward the
+                    # max-reconnect cap.  They are transient — the old
+                    # connection just needs time to expire on Alpaca's side.
+                    conn_mgr.record_connection_limit_error(StreamType.STOCK_DATA)
+                    backoff = conn_mgr.get_connection_limit_backoff(StreamType.STOCK_DATA)
+                    logger.warning(
+                        f"Connection limit exceeded — waiting {backoff:.0f}s "
+                        f"for old connection to expire on Alpaca's side "
+                        f"(attempt counter stays at {self._reconnect_attempts}/"
+                        f"{MAX_RECONNECT_ATTEMPTS})"
+                    )
+                    await asyncio.sleep(backoff)
+                else:
+                    # Non-connection-limit failure — count toward max retries.
+                    self._reconnect_attempts += 1
+                    if self._reconnect_attempts >= MAX_RECONNECT_ATTEMPTS:
+                        logger.error(
+                            f"Max reconnection attempts ({MAX_RECONNECT_ATTEMPTS}) "
+                            f"reached for non-connection-limit errors"
+                        )
+                        raise
 
-                self._reconnect_attempts += 1
-
-                logger.warning(
-                    f"Reconnecting in {delay:.1f}s "
-                    f"(attempt {self._reconnect_attempts}/{MAX_RECONNECT_ATTEMPTS})"
-                    f"{' [connection limit — extended backoff]' if is_connection_limit else ''}"
-                )
-
-                # Explicitly close the old stream before creating a new one
-                # to avoid leaving zombie connections on Alpaca's side
-                await self._close_stream()
-                await asyncio.sleep(delay)
+                    delay = min(
+                        INITIAL_RECONNECT_DELAY * (2**self._reconnect_attempts),
+                        MAX_RECONNECT_DELAY,
+                    )
+                    logger.warning(
+                        f"Reconnecting in {delay:.1f}s "
+                        f"(attempt {self._reconnect_attempts}/{MAX_RECONNECT_ATTEMPTS})"
+                    )
+                    await asyncio.sleep(delay)
 
     async def _close_stream(self) -> None:
         """Close the current stream and release the connection."""
@@ -416,13 +459,19 @@ class DataStreamer:
         """
         Run the data stream synchronously (blocking) with reconnection.
 
+        Uses the same connection-limit handling as ``start()``:
+        - Connection-limit errors are not counted toward the retry cap.
+        - Escalating backoff via ``ConnectionManager`` (120 s, 240 s, …).
+
         Args:
             auto_reconnect: Whether to automatically reconnect on disconnect
         """
         import time
 
+        conn_mgr = get_connection_manager()
         self._should_reconnect = auto_reconnect
         self._reconnect_attempts = 0
+        is_first_attempt = True
 
         while True:
             try:
@@ -433,20 +482,30 @@ class DataStreamer:
                 self._is_running = True
                 logger.info("Starting data stream (sync)...")
 
-                if self._reconnect_attempts > 0:
+                if not is_first_attempt:
                     for callback in self._on_reconnect_callbacks:
                         try:
                             callback()
                         except Exception as e:
                             logger.error(f"Error in reconnect callback: {e}")
-                    self._reconnect_attempts = 0
 
+                is_first_attempt = False
                 self._stream.run()
+
+                conn_mgr.record_connected(StreamType.STOCK_DATA)
+                self._reconnect_attempts = 0
 
             except Exception as e:
                 self._is_running = False
                 error_msg = str(e)
                 logger.error(f"Data stream disconnected: {error_msg}")
+
+                # Close old stream immediately
+                if self._stream is not None:
+                    with contextlib.suppress(Exception):
+                        self._stream.stop()
+                    self._stream = None
+                conn_mgr.record_disconnected(StreamType.STOCK_DATA)
 
                 for callback in self._on_disconnect_callbacks:
                     try:
@@ -457,38 +516,42 @@ class DataStreamer:
                 if not self._should_reconnect:
                     raise
 
-                if self._reconnect_attempts >= MAX_RECONNECT_ATTEMPTS:
-                    logger.error(f"Max reconnection attempts ({MAX_RECONNECT_ATTEMPTS}) reached")
-                    raise
+                is_connection_limit = "connection limit" in error_msg.lower() or "429" in error_msg
 
-                is_connection_limit = "connection limit" in error_msg.lower()
-
-                delay = min(
-                    INITIAL_RECONNECT_DELAY * (2**self._reconnect_attempts), MAX_RECONNECT_DELAY
-                )
                 if is_connection_limit:
-                    delay = max(delay, CONNECTION_LIMIT_BACKOFF)
+                    conn_mgr.record_connection_limit_error(StreamType.STOCK_DATA)
+                    backoff = conn_mgr.get_connection_limit_backoff(StreamType.STOCK_DATA)
+                    logger.warning(
+                        f"Connection limit exceeded — waiting {backoff:.0f}s "
+                        f"(attempt counter stays at {self._reconnect_attempts}/"
+                        f"{MAX_RECONNECT_ATTEMPTS})"
+                    )
+                    time.sleep(backoff)
+                else:
+                    self._reconnect_attempts += 1
+                    if self._reconnect_attempts >= MAX_RECONNECT_ATTEMPTS:
+                        logger.error(
+                            f"Max reconnection attempts ({MAX_RECONNECT_ATTEMPTS}) "
+                            f"reached for non-connection-limit errors"
+                        )
+                        raise
 
-                self._reconnect_attempts += 1
-
-                logger.warning(
-                    f"Reconnecting in {delay:.1f}s "
-                    f"(attempt {self._reconnect_attempts}/{MAX_RECONNECT_ATTEMPTS})"
-                    f"{' [connection limit — extended backoff]' if is_connection_limit else ''}"
-                )
-
-                # Close the old stream before creating a new one
-                if self._stream is not None:
-                    with contextlib.suppress(Exception):
-                        self._stream.stop()
-                    self._stream = None
-                time.sleep(delay)
+                    delay = min(
+                        INITIAL_RECONNECT_DELAY * (2**self._reconnect_attempts),
+                        MAX_RECONNECT_DELAY,
+                    )
+                    logger.warning(
+                        f"Reconnecting in {delay:.1f}s "
+                        f"(attempt {self._reconnect_attempts}/{MAX_RECONNECT_ATTEMPTS})"
+                    )
+                    time.sleep(delay)
 
     async def stop(self) -> None:
         """Stop the data stream and prevent reconnection."""
         self._should_reconnect = False
         self._is_running = False
         await self._close_stream()
+        get_connection_manager().record_disconnected(StreamType.STOCK_DATA)
         logger.info("Data stream stopped")
 
     def is_running(self) -> bool:

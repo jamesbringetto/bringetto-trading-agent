@@ -50,6 +50,10 @@ from loguru import logger
 
 from agent.config.constants import AccountStatus, OrderSide, OrderStatus, TradingSession
 from agent.config.settings import get_settings
+from agent.data.connection_manager import (
+    StreamType,
+    get_connection_manager,
+)
 
 # Eastern timezone for trading session calculations
 ET = ZoneInfo("America/New_York")
@@ -1974,66 +1978,90 @@ class OrderUpdateHandler:
 
             raise
 
-    async def start_with_reconnect(self, max_attempts: int = 10) -> None:
+    async def start_with_reconnect(self, max_attempts: int = 20) -> None:
         """
         Start the trading stream with automatic reconnection.
 
+        Connection-limit errors ("connection limit exceeded", HTTP 429) are
+        handled specially:
+        - They are NOT counted toward ``max_attempts`` because they are a
+          transient server-side condition.
+        - The ``ConnectionManager`` singleton enforces escalating cooldowns
+          (120 s, 240 s, 480 s, …) so the agent does not hammer the limit.
+        - Only non-connection-limit failures increment the retry counter.
+
         Args:
-            max_attempts: Maximum number of reconnection attempts
+            max_attempts: Maximum number of non-connection-limit reconnection
+                          attempts before giving up.
         """
         self._max_reconnect_attempts = max_attempts
         self._reconnect_attempts = 0
+        conn_mgr = get_connection_manager()
+        is_first_attempt = True
 
-        while self._reconnect_attempts < self._max_reconnect_attempts:
+        while True:
             try:
-                # Reset stream on reconnect — close old connection first
-                if self._reconnect_attempts > 0:
+                # Close any leftover stream from a previous attempt
+                if not is_first_attempt:
                     await self._close_trading_stream()
-                    logger.info(
-                        f"Reconnecting to trading stream "
-                        f"(attempt {self._reconnect_attempts + 1}/{self._max_reconnect_attempts})"
-                    )
+                    conn_mgr.record_disconnected(StreamType.TRADING)
 
+                # Ask the ConnectionManager for clearance before connecting.
+                await conn_mgr.wait_for_clearance(StreamType.TRADING)
+
+                if not is_first_attempt:
+                    logger.info("Reconnecting to trading stream...")
+                    for callback in self._on_reconnect_callbacks:
+                        try:
+                            callback()
+                        except Exception as cb_error:
+                            logger.error(f"Error in reconnect callback: {cb_error}")
+
+                is_first_attempt = False
                 await self.start()
 
                 # If we get here, stream ended normally
+                conn_mgr.record_connected(StreamType.TRADING)
+                self._reconnect_attempts = 0
                 break
 
             except Exception as e:
-                self._reconnect_attempts += 1
                 error_msg = str(e)
                 logger.error(f"Trading stream disconnected: {error_msg}")
 
-                if self._reconnect_attempts >= self._max_reconnect_attempts:
-                    logger.critical(
-                        f"Max reconnection attempts ({self._max_reconnect_attempts}) reached. "
-                        "Trading stream permanently disconnected."
-                    )
-                    raise
-
-                # Detect "connection limit exceeded" — use longer backoff
-                is_connection_limit = "connection limit" in error_msg.lower()
-
-                # Exponential backoff: 1s, 2s, 4s, 8s, ... up to 60s
-                delay = min(2**self._reconnect_attempts, 60)
-                if is_connection_limit:
-                    delay = max(delay, 30)
-
-                logger.warning(
-                    f"Reconnecting in {delay} seconds..."
-                    f"{' [connection limit — extended backoff]' if is_connection_limit else ''}"
-                )
-
-                # Close old stream before sleeping to release the connection
+                # Close old stream immediately to release the socket
                 await self._close_trading_stream()
-                await asyncio.sleep(delay)
+                conn_mgr.record_disconnected(StreamType.TRADING)
 
-                # Notify reconnect callbacks
-                for callback in self._on_reconnect_callbacks:
-                    try:
-                        callback()
-                    except Exception as cb_error:
-                        logger.error(f"Error in reconnect callback: {cb_error}")
+                is_connection_limit = "connection limit" in error_msg.lower() or "429" in error_msg
+
+                if is_connection_limit:
+                    # Connection-limit errors are NOT counted toward the
+                    # max-reconnect cap.
+                    conn_mgr.record_connection_limit_error(StreamType.TRADING)
+                    backoff = conn_mgr.get_connection_limit_backoff(StreamType.TRADING)
+                    logger.warning(
+                        f"Connection limit exceeded — waiting {backoff:.0f}s "
+                        f"for old connection to expire on Alpaca's side "
+                        f"(attempt counter stays at {self._reconnect_attempts}/"
+                        f"{self._max_reconnect_attempts})"
+                    )
+                    await asyncio.sleep(backoff)
+                else:
+                    self._reconnect_attempts += 1
+                    if self._reconnect_attempts >= self._max_reconnect_attempts:
+                        logger.critical(
+                            f"Max reconnection attempts ({self._max_reconnect_attempts}) "
+                            f"reached. Trading stream permanently disconnected."
+                        )
+                        raise
+
+                    delay = min(2**self._reconnect_attempts, 60)
+                    logger.warning(
+                        f"Reconnecting in {delay}s "
+                        f"(attempt {self._reconnect_attempts}/{self._max_reconnect_attempts})"
+                    )
+                    await asyncio.sleep(delay)
 
     async def _close_trading_stream(self) -> None:
         """Close the current trading stream and release the connection."""
@@ -2068,6 +2096,7 @@ class OrderUpdateHandler:
         """Stop the trading stream."""
         self._is_authenticated = False
         await self._close_trading_stream()
+        get_connection_manager().record_disconnected(StreamType.TRADING)
         logger.info("Trading stream stopped")
 
     def is_running(self) -> bool:

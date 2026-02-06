@@ -32,6 +32,7 @@ from agent.config.constants import (
     TradingSession,
 )
 from agent.config.settings import get_settings
+from agent.data.connection_manager import get_connection_manager
 from agent.data.indicators import IndicatorCalculator
 from agent.data.streaming import BarData, DataStreamer, QuoteData
 from agent.data.symbol_scanner import SymbolScanner
@@ -1635,6 +1636,7 @@ class TradingAgent:
         return {
             "order_updates": self._order_handler.get_health_status(),
             "data_stream": self._data_streamer.get_health_status() if self._data_streamer else None,
+            "connection_manager": get_connection_manager().get_status(),
         }
 
     async def run(self) -> None:
@@ -1707,6 +1709,13 @@ class TradingAgent:
 
         # Start WebSocket streaming for trade updates
         await self._start_streaming()
+
+        # Stagger the data stream connection to avoid hitting Alpaca's
+        # connection limit.  The trading stream connects first; we wait a
+        # few seconds before opening the (separate) stock-data stream so
+        # both connections don't race for the limit simultaneously.
+        logger.info("Waiting 5 s before starting market data stream (stagger connections)...")
+        await asyncio.sleep(5)
 
         # Start market data streaming (uses scanner results)
         await self._start_market_data_streaming()
