@@ -103,13 +103,18 @@ export default function TradesPage() {
                   </td>
                   <td className="p-4 text-right">
                     {trade.pnl !== null ? (
-                      <span
-                        className={`font-medium ${
-                          trade.pnl >= 0 ? 'text-green-600' : 'text-red-600'
-                        }`}
-                      >
-                        {formatCurrency(trade.pnl)}
-                      </span>
+                      <div className="flex flex-col items-end">
+                        <span
+                          className={`font-medium ${
+                            trade.pnl >= 0 ? 'text-green-600' : 'text-red-600'
+                          }`}
+                        >
+                          {formatCurrency(trade.pnl)}
+                        </span>
+                        {trade.status === 'open' && (
+                          <span className="text-xs text-muted-foreground">unrealized</span>
+                        )}
+                      </div>
                     ) : (
                       '-'
                     )}
