@@ -96,9 +96,9 @@ class Settings(BaseSettings):
         description="Number of days to look back for volume/price screening",
     )
     scanner_max_symbols: int = Field(
-        default=1000,
+        default=500,
         ge=10,
-        description="Maximum number of symbols to include after scanning",
+        description="Maximum number of symbols to include after scanning (matches streaming cap)",
     )
     scanner_rescan_interval_minutes: int = Field(
         default=60,

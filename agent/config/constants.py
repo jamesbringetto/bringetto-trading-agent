@@ -832,4 +832,4 @@ class TradingConstants:
     SCANNER_MIN_PRICE: float = 5.0
     SCANNER_MIN_AVG_VOLUME: int = 1_000_000
     SCANNER_LOOKBACK_DAYS: int = 5
-    SCANNER_MAX_SYMBOLS: int = 1000
+    SCANNER_MAX_SYMBOLS: int = 500

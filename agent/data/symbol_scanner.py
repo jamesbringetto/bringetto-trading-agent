@@ -31,8 +31,16 @@ from agent.config.settings import get_settings
 # Rate limit: Alpaca allows 200 requests/min.
 # We batch bar requests at up to 100 symbols each to stay well within limits.
 BARS_BATCH_SIZE = 100
-# Pause between bar batches to respect rate limits
-BATCH_DELAY_SECONDS = 0.5
+# Pause between bar batches to respect rate limits.
+# 1.0 s keeps us at ~60 req/min — well under the 200 limit and leaves headroom
+# for intraday rescans and other API calls running concurrently.
+BATCH_DELAY_SECONDS = 1.0
+# When a batch hits a rate-limit (429) or transient error, retry with backoff.
+MAX_BATCH_RETRIES = 3
+BATCH_RETRY_BASE_DELAY = 5.0  # seconds; doubles each retry (5, 10, 20)
+# If we've already found this many multiples of max_symbols, stop scanning
+# early — we have more than enough candidates to pick the top N from.
+EARLY_EXIT_MULTIPLIER = 3
 
 
 class ScanResult:
@@ -178,7 +186,10 @@ class SymbolScanner:
         """
         Screen symbols using recent historical daily bars.
 
-        Fetches bars in batches to respect rate limits.
+        Fetches bars in batches to respect rate limits.  Each batch is retried
+        with exponential backoff on 429 / transient API errors so we don't
+        silently lose symbols.
+
         Returns (qualified_symbols, volume_map, price_map).
         """
         qualified: list[str] = []
@@ -186,6 +197,10 @@ class SymbolScanner:
         price_map: dict[str, float] = {}
 
         start_date = datetime.now() - timedelta(days=lookback_days + 5)  # Extra buffer for weekends
+
+        # Early-exit threshold: once we find this many, we can stop scanning
+        # because scan() will cap to self._max_symbols anyway.
+        early_exit_target = self._max_symbols * EARLY_EXIT_MULTIPLIER
 
         total_batches = (len(symbols) + BARS_BATCH_SIZE - 1) // BARS_BATCH_SIZE
         logger.info(
@@ -197,51 +212,87 @@ class SymbolScanner:
             batch = symbols[batch_idx : batch_idx + BARS_BATCH_SIZE]
             batch_num = batch_idx // BARS_BATCH_SIZE + 1
 
-            try:
-                request = StockBarsRequest(
-                    symbol_or_symbols=batch,
-                    timeframe=TimeFrame.Day,
-                    start=start_date,
-                )
-                bars_response = self._data_client.get_stock_bars(request)
-
-                for symbol in batch:
-                    try:
-                        symbol_bars = bars_response[symbol]
-                    except (KeyError, IndexError):
-                        continue
-                    if not symbol_bars or len(symbol_bars) < 2:
-                        continue
-
-                    # Calculate average volume over the lookback period
-                    volumes = [b.volume for b in symbol_bars[-lookback_days:]]
-                    avg_volume = sum(volumes) / len(volumes) if volumes else 0
-
-                    # Get last close price
-                    last_close = float(symbol_bars[-1].close)
-
-                    if last_close >= min_price and avg_volume >= min_avg_volume:
-                        qualified.append(symbol)
-                        volume_map[symbol] = avg_volume
-                        price_map[symbol] = last_close
-
-                if batch_num < total_batches:
-                    # Brief pause between batches to respect rate limits
-                    time.sleep(BATCH_DELAY_SECONDS)
-
-                if batch_num % 10 == 0 or batch_num == total_batches:
-                    logger.info(
-                        f"  Batch {batch_num}/{total_batches} complete - "
-                        f"{len(qualified)} qualified so far"
+            # Retry loop for transient / rate-limit errors
+            for attempt in range(MAX_BATCH_RETRIES + 1):
+                try:
+                    request = StockBarsRequest(
+                        symbol_or_symbols=batch,
+                        timeframe=TimeFrame.Day,
+                        start=start_date,
                     )
+                    bars_response = self._data_client.get_stock_bars(request)
 
-            except APIError as e:
-                logger.warning(f"API error on batch {batch_num}: {e}")
-                # Continue with next batch rather than failing entirely
-                time.sleep(2.0)
-            except Exception as e:
-                logger.error(f"Unexpected error on batch {batch_num}: {e}")
-                time.sleep(2.0)
+                    for symbol in batch:
+                        try:
+                            symbol_bars = bars_response[symbol]
+                        except (KeyError, IndexError):
+                            continue
+                        if not symbol_bars or len(symbol_bars) < 2:
+                            continue
+
+                        # Calculate average volume over the lookback period
+                        volumes = [b.volume for b in symbol_bars[-lookback_days:]]
+                        avg_volume = sum(volumes) / len(volumes) if volumes else 0
+
+                        # Get last close price
+                        last_close = float(symbol_bars[-1].close)
+
+                        if last_close >= min_price and avg_volume >= min_avg_volume:
+                            qualified.append(symbol)
+                            volume_map[symbol] = avg_volume
+                            price_map[symbol] = last_close
+
+                    # Batch succeeded — break out of retry loop
+                    break
+
+                except APIError as e:
+                    is_rate_limit = "429" in str(e) or "rate" in str(e).lower()
+                    if attempt < MAX_BATCH_RETRIES:
+                        retry_delay = BATCH_RETRY_BASE_DELAY * (2**attempt)
+                        logger.warning(
+                            f"{'Rate-limited' if is_rate_limit else 'API error'} on batch "
+                            f"{batch_num}/{total_batches} (attempt {attempt + 1}/"
+                            f"{MAX_BATCH_RETRIES + 1}): {e} — retrying in {retry_delay:.0f}s"
+                        )
+                        time.sleep(retry_delay)
+                    else:
+                        logger.error(
+                            f"Batch {batch_num}/{total_batches} failed after "
+                            f"{MAX_BATCH_RETRIES + 1} attempts: {e} — skipping batch"
+                        )
+                except Exception as e:
+                    if attempt < MAX_BATCH_RETRIES:
+                        retry_delay = BATCH_RETRY_BASE_DELAY * (2**attempt)
+                        logger.error(
+                            f"Unexpected error on batch {batch_num}/{total_batches} "
+                            f"(attempt {attempt + 1}/{MAX_BATCH_RETRIES + 1}): {e} "
+                            f"— retrying in {retry_delay:.0f}s"
+                        )
+                        time.sleep(retry_delay)
+                    else:
+                        logger.error(
+                            f"Batch {batch_num}/{total_batches} failed after "
+                            f"{MAX_BATCH_RETRIES + 1} attempts: {e} — skipping batch"
+                        )
+
+            # Pause between batches to stay under rate limits
+            if batch_num < total_batches:
+                time.sleep(BATCH_DELAY_SECONDS)
+
+            if batch_num % 10 == 0 or batch_num == total_batches:
+                logger.info(
+                    f"  Batch {batch_num}/{total_batches} complete - "
+                    f"{len(qualified)} qualified so far"
+                )
+
+            # Early exit: we already have plenty of candidates to rank from
+            if len(qualified) >= early_exit_target:
+                logger.info(
+                    f"  Early exit at batch {batch_num}/{total_batches}: "
+                    f"{len(qualified)} qualified >= {early_exit_target} "
+                    f"(need {self._max_symbols})"
+                )
+                break
 
         logger.info(
             f"Screening complete: {len(qualified)} symbols qualified "
@@ -337,40 +388,53 @@ class SymbolScanner:
         # Fetch snapshots in batches
         for batch_idx in range(0, len(symbols), BARS_BATCH_SIZE):
             batch = symbols[batch_idx : batch_idx + BARS_BATCH_SIZE]
-            try:
-                request = StockSnapshotRequest(symbol_or_symbols=batch)
-                snapshots = self._data_client.get_stock_snapshot(request)
 
-                for symbol, snapshot in snapshots.items():
-                    if not snapshot or not snapshot.daily_bar or not snapshot.previous_daily_bar:
-                        continue
+            for attempt in range(MAX_BATCH_RETRIES + 1):
+                try:
+                    request = StockSnapshotRequest(symbol_or_symbols=batch)
+                    snapshots = self._data_client.get_stock_snapshot(request)
 
-                    prev_close = float(snapshot.previous_daily_bar.close)
-                    current_price = float(snapshot.daily_bar.close)
+                    for symbol, snapshot in snapshots.items():
+                        if not snapshot or not snapshot.daily_bar or not snapshot.previous_daily_bar:
+                            continue
 
-                    if prev_close <= 0 or current_price < min_price:
-                        continue
+                        prev_close = float(snapshot.previous_daily_bar.close)
+                        current_price = float(snapshot.daily_bar.close)
 
-                    gap_pct = ((current_price - prev_close) / prev_close) * 100
+                        if prev_close <= 0 or current_price < min_price:
+                            continue
 
-                    if abs(gap_pct) >= min_gap_pct:
-                        gap_candidates.append(
-                            {
-                                "symbol": symbol,
-                                "gap_pct": round(gap_pct, 2),
-                                "previous_close": prev_close,
-                                "current_price": current_price,
-                                "direction": "up" if gap_pct > 0 else "down",
-                            }
-                        )
+                        gap_pct = ((current_price - prev_close) / prev_close) * 100
 
-                time.sleep(BATCH_DELAY_SECONDS)
+                        if abs(gap_pct) >= min_gap_pct:
+                            gap_candidates.append(
+                                {
+                                    "symbol": symbol,
+                                    "gap_pct": round(gap_pct, 2),
+                                    "previous_close": prev_close,
+                                    "current_price": current_price,
+                                    "direction": "up" if gap_pct > 0 else "down",
+                                }
+                            )
 
-            except APIError as e:
-                logger.warning(f"API error during gap scan: {e}")
-                time.sleep(2.0)
-            except Exception as e:
-                logger.error(f"Error during gap scan: {e}")
+                    break  # success
+
+                except APIError as e:
+                    if attempt < MAX_BATCH_RETRIES:
+                        retry_delay = BATCH_RETRY_BASE_DELAY * (2**attempt)
+                        logger.warning(f"API error during gap scan (attempt {attempt + 1}): {e} — retrying in {retry_delay:.0f}s")
+                        time.sleep(retry_delay)
+                    else:
+                        logger.warning(f"Gap scan batch failed after {MAX_BATCH_RETRIES + 1} attempts: {e}")
+                except Exception as e:
+                    if attempt < MAX_BATCH_RETRIES:
+                        retry_delay = BATCH_RETRY_BASE_DELAY * (2**attempt)
+                        logger.error(f"Error during gap scan (attempt {attempt + 1}): {e} — retrying in {retry_delay:.0f}s")
+                        time.sleep(retry_delay)
+                    else:
+                        logger.error(f"Gap scan batch failed after {MAX_BATCH_RETRIES + 1} attempts: {e}")
+
+            time.sleep(BATCH_DELAY_SECONDS)
 
         # Sort by absolute gap size (largest first)
         gap_candidates.sort(key=lambda x: abs(x["gap_pct"]), reverse=True)
@@ -421,50 +485,63 @@ class SymbolScanner:
 
         for batch_idx in range(0, len(candidates), BARS_BATCH_SIZE):
             batch = candidates[batch_idx : batch_idx + BARS_BATCH_SIZE]
-            try:
-                request = StockBarsRequest(
-                    symbol_or_symbols=batch,
-                    timeframe=TimeFrame.Day,
-                    start=start_date,
-                )
-                bars_response = self._data_client.get_stock_bars(request)
 
-                for symbol in batch:
-                    try:
-                        symbol_bars = bars_response[symbol]
-                    except (KeyError, IndexError):
-                        continue
-                    if not symbol_bars or len(symbol_bars) < lookback_days:
-                        continue
+            for attempt in range(MAX_BATCH_RETRIES + 1):
+                try:
+                    request = StockBarsRequest(
+                        symbol_or_symbols=batch,
+                        timeframe=TimeFrame.Day,
+                        start=start_date,
+                    )
+                    bars_response = self._data_client.get_stock_bars(request)
 
-                    recent_bars = symbol_bars[-lookback_days:]
-                    first_close = float(recent_bars[0].close)
-                    last_close = float(recent_bars[-1].close)
+                    for symbol in batch:
+                        try:
+                            symbol_bars = bars_response[symbol]
+                        except (KeyError, IndexError):
+                            continue
+                        if not symbol_bars or len(symbol_bars) < lookback_days:
+                            continue
 
-                    if first_close <= 0:
-                        continue
+                        recent_bars = symbol_bars[-lookback_days:]
+                        first_close = float(recent_bars[0].close)
+                        last_close = float(recent_bars[-1].close)
 
-                    return_pct = ((last_close - first_close) / first_close) * 100
+                        if first_close <= 0:
+                            continue
 
-                    if abs(return_pct) >= min_return_pct:
-                        avg_vol = sum(b.volume for b in recent_bars) / len(recent_bars)
-                        momentum_candidates.append(
-                            {
-                                "symbol": symbol,
-                                "return_pct": round(return_pct, 2),
-                                "avg_volume": avg_vol,
-                                "last_close": last_close,
-                                "direction": "up" if return_pct > 0 else "down",
-                            }
-                        )
+                        return_pct = ((last_close - first_close) / first_close) * 100
 
-                time.sleep(BATCH_DELAY_SECONDS)
+                        if abs(return_pct) >= min_return_pct:
+                            avg_vol = sum(b.volume for b in recent_bars) / len(recent_bars)
+                            momentum_candidates.append(
+                                {
+                                    "symbol": symbol,
+                                    "return_pct": round(return_pct, 2),
+                                    "avg_volume": avg_vol,
+                                    "last_close": last_close,
+                                    "direction": "up" if return_pct > 0 else "down",
+                                }
+                            )
 
-            except APIError as e:
-                logger.warning(f"API error during momentum scan: {e}")
-                time.sleep(2.0)
-            except Exception as e:
-                logger.error(f"Error during momentum scan: {e}")
+                    break  # success
+
+                except APIError as e:
+                    if attempt < MAX_BATCH_RETRIES:
+                        retry_delay = BATCH_RETRY_BASE_DELAY * (2**attempt)
+                        logger.warning(f"API error during momentum scan (attempt {attempt + 1}): {e} — retrying in {retry_delay:.0f}s")
+                        time.sleep(retry_delay)
+                    else:
+                        logger.warning(f"Momentum scan batch failed after {MAX_BATCH_RETRIES + 1} attempts: {e}")
+                except Exception as e:
+                    if attempt < MAX_BATCH_RETRIES:
+                        retry_delay = BATCH_RETRY_BASE_DELAY * (2**attempt)
+                        logger.error(f"Error during momentum scan (attempt {attempt + 1}): {e} — retrying in {retry_delay:.0f}s")
+                        time.sleep(retry_delay)
+                    else:
+                        logger.error(f"Momentum scan batch failed after {MAX_BATCH_RETRIES + 1} attempts: {e}")
+
+            time.sleep(BATCH_DELAY_SECONDS)
 
         # Sort by absolute return (strongest momentum first)
         momentum_candidates.sort(key=lambda x: abs(x["return_pct"]), reverse=True)
