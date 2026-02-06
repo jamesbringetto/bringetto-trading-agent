@@ -113,7 +113,7 @@ async def get_trade_history(
                 symbol=symbol,
             )
 
-            return [
+            result = [
                 TradeResponse(
                     id=str(t.id),
                     timestamp=t.timestamp.isoformat() if t.timestamp else "",
@@ -136,6 +136,25 @@ async def get_trade_history(
                 )
                 for t in trades
             ]
+
+            # Enrich open trades with unrealized P&L from broker positions
+            open_trades = [r for r in result if r.status == "open"]
+            if open_trades:
+                try:
+                    state = get_agent_state()
+                    broker = state.get("broker")
+                    if broker:
+                        positions = broker.get_positions()
+                        pos_by_symbol = {p.symbol: p for p in positions}
+                        for trade in open_trades:
+                            pos = pos_by_symbol.get(trade.symbol)
+                            if pos and float(pos.qty) != 0:
+                                trade.pnl = round(float(pos.unrealized_pl), 2)
+                                trade.pnl_percent = round(float(pos.unrealized_plpc) * 100, 2)
+                except Exception:
+                    pass  # Don't fail the request if broker is unavailable
+
+            return result
     except Exception:
         # If database isn't available, return empty list
         return []
