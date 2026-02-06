@@ -731,6 +731,8 @@ class TradingAgent:
         symbols = self._get_trading_symbols()
         evaluated_count = 0
         inst = get_instrumentation()
+        # Track per-strategy rejection counts to batch-record at end
+        rejection_counts: dict[str, int] = {}
 
         for symbol in symbols:
             context = self._build_market_context(symbol)
@@ -759,13 +761,47 @@ class TradingAgent:
                 evaluated_count += 1
 
                 if signal:
-                    # Signal generated - process it
+                    # Signal generated - record full evaluation with context
+                    inst.record_evaluation(
+                        strategy_name=strategy.name,
+                        symbol=symbol,
+                        evaluation_type="entry",
+                        decision="accepted",
+                        context={
+                            "current_price": context.current_price,
+                            "volume": context.volume,
+                            "vwap": context.vwap,
+                            "rsi": context.rsi,
+                            "macd": context.macd,
+                            "atr": context.atr,
+                            "vix": context.vix,
+                            "bid": context.bid,
+                            "ask": context.ask,
+                        },
+                        signal={
+                            "side": signal.side.value,
+                            "confidence": signal.confidence,
+                            "reasoning": signal.reasoning,
+                            "entry_price": signal.entry_price,
+                            "stop_loss": signal.stop_loss,
+                            "take_profit": signal.take_profit,
+                        },
+                    )
+                    inst.record_pipeline_event("signal_generated", strategy.name)
                     logger.info(
                         f"Signal generated: {strategy.name} | {symbol} | "
                         f"{signal.side.value} @ ${signal.entry_price}"
                     )
                     # Validate and execute the trade
                     self._execute_trade(signal, strategy)
+                else:
+                    # No signal - batch rejection count (avoid flooding
+                    # the evaluations list with thousands of entries)
+                    rejection_counts[strategy.name] = rejection_counts.get(strategy.name, 0) + 1
+
+        # Batch-record all rejections per strategy
+        for strategy_name, count in rejection_counts.items():
+            inst.record_rejection_batch(strategy_name, count)
 
         if evaluated_count > 0:
             logger.debug(f"Evaluated {evaluated_count} strategy/symbol combinations")
