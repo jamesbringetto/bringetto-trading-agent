@@ -145,7 +145,7 @@ class DataStreamer:
         self._subscribed_quotes: set[str] = set()
         self._subscribed_trades: set[str] = set()
 
-        logger.info(f"DataStreamer initialized with {feed.value} feed")
+        logger.info(f"DataStreamer initialized with {self._feed.value} feed")
 
     def _init_stream(self) -> None:
         """Initialize the data stream."""

@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { api, DataReceptionStats, EvaluationSummary, StrategyEvaluation, FunnelData, StrategyEvaluationStats, InstrumentationTimeRange } from '@/lib/api';
+import { api, DataReceptionStats, EvaluationSummary, StrategyEvaluation, FunnelData, StrategyEvaluationStats } from '@/lib/api';
 import {
   Activity,
   BarChart3,
@@ -22,19 +22,10 @@ import {
 import { useTimezoneStore, TIMEZONE_OPTIONS } from '@/lib/timezone-store';
 import { StrategyTooltip } from '@/components/strategy-tooltip';
 
-const TIME_RANGE_OPTIONS: { value: InstrumentationTimeRange; label: string }[] = [
-  { value: 'session', label: 'This Session' },
-  { value: '1d', label: 'Last 24 Hours' },
-  { value: '7d', label: 'Last 7 Days' },
-  { value: '30d', label: 'Last 30 Days' },
-];
-
 export default function InstrumentationPage() {
-  const [timeRange, setTimeRange] = useState<InstrumentationTimeRange>('1d');
-
   const { data: status, isLoading, refetch, dataUpdatedAt } = useQuery({
-    queryKey: ['instrumentation-status', timeRange],
-    queryFn: () => api.getInstrumentationStatus(timeRange),
+    queryKey: ['instrumentation-status'],
+    queryFn: () => api.getInstrumentationStatus('session'),
     refetchInterval: 5000, // Refresh every 5 seconds
   });
 
@@ -67,7 +58,6 @@ export default function InstrumentationPage() {
           </p>
         </div>
         <div className="flex items-center gap-3">
-          <TimeRangeSelector value={timeRange} onChange={setTimeRange} />
           <button
             onClick={() => refetch()}
             className="flex items-center gap-2 rounded-lg border px-3 py-2 text-sm hover:bg-muted transition-colors"
@@ -119,7 +109,7 @@ export default function InstrumentationPage() {
           Strategy Evaluation Summary
         </h2>
         {status?.evaluations ? (
-          <EvaluationSummaryCard summary={status.evaluations} timeRange={timeRange} />
+          <EvaluationSummaryCard summary={status.evaluations} />
         ) : (
           <div className="rounded-lg border bg-card p-6 text-center text-muted-foreground">
             No evaluation data available
@@ -148,31 +138,6 @@ export default function InstrumentationPage() {
   );
 }
 
-function TimeRangeSelector({
-  value,
-  onChange,
-}: {
-  value: InstrumentationTimeRange;
-  onChange: (value: InstrumentationTimeRange) => void;
-}) {
-  return (
-    <div className="flex items-center gap-1 rounded-lg border p-1">
-      {TIME_RANGE_OPTIONS.map((option) => (
-        <button
-          key={option.value}
-          onClick={() => onChange(option.value)}
-          className={`px-3 py-1.5 text-sm rounded-md transition-colors ${
-            value === option.value
-              ? 'bg-primary text-primary-foreground'
-              : 'text-muted-foreground hover:text-foreground hover:bg-muted'
-          }`}
-        >
-          {option.label}
-        </button>
-      ))}
-    </div>
-  );
-}
 
 function LastUpdatedFooter({ timestamp }: { timestamp: number }) {
   const { timezone } = useTimezoneStore();
@@ -288,7 +253,7 @@ function DataReceptionCard({ stats }: { stats: DataReceptionStats }) {
   );
 }
 
-function EvaluationSummaryCard({ summary, timeRange }: { summary: EvaluationSummary; timeRange?: InstrumentationTimeRange }) {
+function EvaluationSummaryCard({ summary }: { summary: EvaluationSummary }) {
   const strategies = Object.entries(summary.by_strategy || {});
   const [expandedStrategy, setExpandedStrategy] = useState<string | null>(null);
 
@@ -299,11 +264,7 @@ function EvaluationSummaryCard({ summary, timeRange }: { summary: EvaluationSumm
         <StatBox
           label="Total Evaluations"
           value={summary.total_evaluations.toLocaleString()}
-          subValue={
-            timeRange
-              ? TIME_RANGE_OPTIONS.find((o) => o.value === timeRange)?.label ?? 'Total'
-              : 'Session total'
-          }
+          subValue="This Session"
         />
         <StatBox
           label="Accepted"
