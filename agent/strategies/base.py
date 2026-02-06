@@ -184,9 +184,9 @@ class BaseStrategy(ABC):
         """
         stop_loss_pct = self.parameters.get("stop_loss_pct", 1.0) / 100
         if side == OrderSide.BUY:
-            return entry_price * Decimal(1 - stop_loss_pct)
+            return (entry_price * Decimal(1 - stop_loss_pct)).quantize(Decimal("0.01"))
         else:
-            return entry_price * Decimal(1 + stop_loss_pct)
+            return (entry_price * Decimal(1 + stop_loss_pct)).quantize(Decimal("0.01"))
 
     def calculate_take_profit(
         self, entry_price: Decimal, side: OrderSide, atr: float | None = None
@@ -199,9 +199,9 @@ class BaseStrategy(ABC):
         """
         take_profit_pct = self.parameters.get("take_profit_pct", 2.0) / 100
         if side == OrderSide.BUY:
-            return entry_price * Decimal(1 + take_profit_pct)
+            return (entry_price * Decimal(1 + take_profit_pct)).quantize(Decimal("0.01"))
         else:
-            return entry_price * Decimal(1 - take_profit_pct)
+            return (entry_price * Decimal(1 - take_profit_pct)).quantize(Decimal("0.01"))
 
     def validate_entry(self, context: MarketContext) -> tuple[bool, str]:
         """

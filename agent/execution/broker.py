@@ -728,16 +728,17 @@ class AlpacaBroker:
         """
         try:
             # Build take profit leg
-            take_profit = TakeProfitRequest(limit_price=float(take_profit_price))
+            # Round prices to 2 decimal places to satisfy Alpaca's minimum pricing criteria
+            take_profit = TakeProfitRequest(limit_price=round(float(take_profit_price), 2))
 
             # Build stop loss leg (can be stop or stop-limit)
             if stop_loss_limit_price:
                 stop_loss = StopLossRequest(
-                    stop_price=float(stop_loss_price),
-                    limit_price=float(stop_loss_limit_price),
+                    stop_price=round(float(stop_loss_price), 2),
+                    limit_price=round(float(stop_loss_limit_price), 2),
                 )
             else:
-                stop_loss = StopLossRequest(stop_price=float(stop_loss_price))
+                stop_loss = StopLossRequest(stop_price=round(float(stop_loss_price), 2))
 
             # Use GTC so bracket legs (stop/take-profit) survive market close
             # This prevents positions being left unprotected overnight
@@ -820,23 +821,24 @@ class AlpacaBroker:
         """
         try:
             # Build take profit leg
-            take_profit = TakeProfitRequest(limit_price=float(take_profit_price))
+            # Round prices to 2 decimal places to satisfy Alpaca's minimum pricing criteria
+            take_profit = TakeProfitRequest(limit_price=round(float(take_profit_price), 2))
 
             # Build stop loss leg
             if stop_loss_limit_price:
                 stop_loss = StopLossRequest(
-                    stop_price=float(stop_loss_price),
-                    limit_price=float(stop_loss_limit_price),
+                    stop_price=round(float(stop_loss_price), 2),
+                    limit_price=round(float(stop_loss_limit_price), 2),
                 )
             else:
-                stop_loss = StopLossRequest(stop_price=float(stop_loss_price))
+                stop_loss = StopLossRequest(stop_price=round(float(stop_loss_price), 2))
 
             # OCO uses limit order type with order_class="oco"
             order_data = LimitOrderRequest(
                 symbol=symbol,
                 side=self._convert_order_side(side),
                 qty=float(qty),
-                limit_price=float(take_profit_price),  # Take profit price as limit
+                limit_price=round(float(take_profit_price), 2),  # Take profit price as limit
                 time_in_force=TimeInForce.GTC,
                 order_class="oco",
                 take_profit=take_profit,
@@ -907,15 +909,16 @@ class AlpacaBroker:
             stop_loss = None
 
             if take_profit_price:
-                take_profit = TakeProfitRequest(limit_price=float(take_profit_price))
+                # Round to 2 decimal places to satisfy Alpaca's minimum pricing criteria
+                take_profit = TakeProfitRequest(limit_price=round(float(take_profit_price), 2))
             elif stop_loss_price:
                 if stop_loss_limit_price:
                     stop_loss = StopLossRequest(
-                        stop_price=float(stop_loss_price),
-                        limit_price=float(stop_loss_limit_price),
+                        stop_price=round(float(stop_loss_price), 2),
+                        limit_price=round(float(stop_loss_limit_price), 2),
                     )
                 else:
-                    stop_loss = StopLossRequest(stop_price=float(stop_loss_price))
+                    stop_loss = StopLossRequest(stop_price=round(float(stop_loss_price), 2))
 
             # Build the appropriate entry order
             if entry_type == "limit":
