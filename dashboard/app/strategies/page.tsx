@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, StrategyPerformance } from '@/lib/api';
 import { formatCurrency, formatPercent } from '@/lib/utils';
 import { ToggleLeft, ToggleRight, TrendingUp, TrendingDown } from 'lucide-react';
+import { StrategyTooltip } from '@/components/strategy-tooltip';
 
 export default function StrategiesPage() {
   const queryClient = useQueryClient();
@@ -83,7 +84,9 @@ function StrategyCard({
             )}
           </div>
           <div>
-            <h3 className="font-semibold">{strategy.name}</h3>
+            <h3 className="font-semibold">
+              <StrategyTooltip name={strategy.name}>{strategy.name}</StrategyTooltip>
+            </h3>
             <p className="text-sm text-muted-foreground">
               {strategy.strategy_type.replace('_', ' ').toUpperCase()}
             </p>
