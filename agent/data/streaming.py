@@ -44,11 +44,12 @@ MAX_RECONNECT_ATTEMPTS = 20  # only counts non-connection-limit failures
 INITIAL_RECONNECT_DELAY = 2.0  # seconds
 MAX_RECONNECT_DELAY = 60.0  # seconds
 
-# Per-type subscription caps.  SIP (paid, $99/mo) can handle many more symbols
-# than the free IEX feed.  These are practical caps to prevent client-side
-# overload, not hard Alpaca limits.
-MAX_SUBSCRIBED_SYMBOLS_IEX = 500
-MAX_SUBSCRIBED_SYMBOLS_SIP = 1500
+# Per-type subscription caps, based on Alpaca plan limits.
+#   Basic (free):  IEX only, hard WebSocket limit of 30 symbols.
+#   Algo Trader Plus ($99/mo):  SIP feed, unlimited WebSocket symbols.
+# The SIP cap below is a practical client-side cap — Alpaca imposes no limit.
+MAX_SUBSCRIBED_SYMBOLS_IEX = 30    # Alpaca Basic plan hard limit
+MAX_SUBSCRIBED_SYMBOLS_SIP = 2500  # practical cap (Alpaca: unlimited)
 
 
 @dataclass

@@ -28,13 +28,14 @@ from loguru import logger
 
 from agent.config.settings import get_settings
 
-# Rate limit: Alpaca allows 200 requests/min.
-# We batch bar requests at up to 100 symbols each to stay well within limits.
+# Rate limit: Basic plan = 200 req/min, Algo Trader Plus = unlimited.
+# We batch bar requests at up to 100 symbols each and add a brief pause to
+# avoid hammering the API regardless of plan.
 BARS_BATCH_SIZE = 100
-# Pause between bar batches to respect rate limits.
-# 1.0 s keeps us at ~60 req/min — well under the 200 limit and leaves headroom
-# for intraday rescans and other API calls running concurrently.
-BATCH_DELAY_SECONDS = 1.0
+# Pause between bar batches.  Even on Algo Trader Plus (unlimited API calls)
+# a small delay avoids overwhelming the network and leaves headroom for
+# concurrent intraday rescans.
+BATCH_DELAY_SECONDS = 0.5
 # When a batch hits a rate-limit (429) or transient error, retry with backoff.
 MAX_BATCH_RETRIES = 3
 BATCH_RETRY_BASE_DELAY = 5.0  # seconds; doubles each retry (5, 10, 20)
