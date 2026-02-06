@@ -1,6 +1,6 @@
 'use client';
 
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
 import { formatCurrency, formatPercent } from '@/lib/utils';
@@ -16,10 +16,13 @@ import {
   BarChart3,
   Clock,
   LogOut,
+  ToggleLeft,
+  ToggleRight,
 } from 'lucide-react';
 
 export default function Dashboard() {
   const router = useRouter();
+  const queryClient = useQueryClient();
 
   const { data: portfolio, isLoading: portfolioLoading } = useQuery({
     queryKey: ['portfolio'],
@@ -36,7 +39,16 @@ export default function Dashboard() {
     queryFn: () => api.getTradingStatus(),
   });
 
+  const toggleLimitsMutation = useMutation({
+    mutationFn: (disabled: boolean) => api.toggleTradingLimits(disabled),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['portfolio'] });
+      queryClient.invalidateQueries({ queryKey: ['status'] });
+    },
+  });
+
   const isLoading = portfolioLoading || strategiesLoading;
+  const limitsDisabled = portfolio?.trading_limits_disabled ?? false;
 
   const handleLogout = async () => {
     await fetch('/api/auth/logout', { method: 'POST' });
@@ -75,6 +87,45 @@ export default function Dashboard() {
         </div>
       </div>
 
+      {/* Trading Limits Toggle */}
+      <div
+        className={`flex items-center justify-between rounded-lg border p-4 ${
+          limitsDisabled
+            ? 'border-amber-500/50 bg-amber-500/10'
+            : 'bg-card'
+        }`}
+      >
+        <div className="flex items-center gap-3">
+          <div>
+            <p className="font-medium text-sm">
+              Trading Limits (Paper Mode)
+            </p>
+            <p className="text-xs text-muted-foreground">
+              {limitsDisabled
+                ? 'Position and trade count limits are disabled'
+                : 'Max 10 open positions, 30 trades per day'}
+            </p>
+          </div>
+        </div>
+        <button
+          onClick={() => toggleLimitsMutation.mutate(!limitsDisabled)}
+          disabled={toggleLimitsMutation.isPending}
+          className="flex items-center gap-2 text-sm"
+        >
+          {limitsDisabled ? (
+            <>
+              <span className="text-amber-600">Limits Off</span>
+              <ToggleRight className="h-7 w-7 text-amber-500" />
+            </>
+          ) : (
+            <>
+              <span className="text-muted-foreground">Limits On</span>
+              <ToggleLeft className="h-7 w-7 text-muted-foreground" />
+            </>
+          )}
+        </button>
+      </div>
+
       {/* Stats Grid */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <StatusCard
@@ -94,14 +145,14 @@ export default function Dashboard() {
         <StatusCard
           title="Open Positions"
           value={portfolio?.open_positions?.toString() || '0'}
-          subtitle={`of ${portfolio?.max_positions ?? 10} max`}
+          subtitle={limitsDisabled ? 'no limit' : `of ${portfolio?.max_positions ?? 10} max`}
           icon={Activity}
           loading={isLoading}
         />
         <StatusCard
           title="Trades Today"
           value={portfolio?.trades_today?.toString() || '0'}
-          subtitle={`of ${portfolio?.max_trades ?? 30} max`}
+          subtitle={limitsDisabled ? 'no limit' : `of ${portfolio?.max_trades ?? 30} max`}
           icon={Clock}
           loading={isLoading}
         />

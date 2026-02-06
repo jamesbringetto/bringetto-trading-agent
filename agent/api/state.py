@@ -8,6 +8,7 @@ _agent_state: dict[str, Any] = {
     "circuit_breaker": None,
     "strategies": [],
     "is_running": False,
+    "trading_limits_disabled": False,
 }
 
 

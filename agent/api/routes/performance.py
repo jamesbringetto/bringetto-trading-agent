@@ -106,6 +106,7 @@ async def get_performance_summary() -> dict[str, Any]:
             pass
 
     settings = get_settings()
+    trading_limits_disabled = state.get("trading_limits_disabled", False)
 
     return {
         "account": {
@@ -116,9 +117,12 @@ async def get_performance_summary() -> dict[str, Any]:
         "today": {
             "pnl": daily_pnl,
             "trades": trades_today,
-            "max_trades": daily_stats.get("max_trades", settings.max_trades_per_day),
-            "max_positions": settings.max_concurrent_positions,
+            "max_trades": None
+            if trading_limits_disabled
+            else daily_stats.get("max_trades", settings.max_trades_per_day),
+            "max_positions": None if trading_limits_disabled else settings.max_concurrent_positions,
             "open_positions": open_positions,
+            "trading_limits_disabled": trading_limits_disabled,
         },
         "circuit_breaker": {
             "is_triggered": daily_stats.get("is_triggered", False),
