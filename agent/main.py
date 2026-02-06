@@ -21,6 +21,8 @@ from datetime import datetime, time, timedelta
 from decimal import Decimal
 
 import pytz
+from alpaca.data.requests import StockBarsRequest
+from alpaca.data.timeframe import TimeFrame
 from dateutil import parser as date_parser
 from loguru import logger
 
@@ -648,6 +650,131 @@ class TradingAgent:
             atr=indicators["atr"],
             adx=indicators["adx"],
         )
+
+    def _preload_historical_bars(self) -> None:
+        """
+        Preload recent 1-minute bars for all trading symbols to bootstrap indicators.
+
+        Without this, strategies that depend on technical indicators (RSI, MACD, MA50)
+        cannot generate signals until enough streaming bars accumulate (14-50+ minutes).
+        By fetching the last 60 minutes of 1-min bars at startup, indicators are
+        available immediately.
+
+        Also bootstraps ORB opening ranges from historical data if the agent started
+        after the 9:30-9:45 AM ET range-collection window.
+        """
+        symbols = self._get_trading_symbols()
+        if not symbols:
+            logger.warning("No trading symbols — skipping historical bar preload")
+            return
+
+        logger.info(f"Preloading historical 1-min bars for {len(symbols)} symbols...")
+
+        now_et = self._get_market_time()
+        # Fetch 60 minutes of bars — enough for RSI(14), MACD(26), with room to spare.
+        # Not enough for MA50/MA200 but those will fill in from streaming.
+        lookback_minutes = 60
+        start_time = now_et - timedelta(minutes=lookback_minutes)
+
+        BATCH_SIZE = 100  # Alpaca multi-symbol batch size
+        total_bars_loaded = 0
+        orb_ranges_built = 0
+
+        for batch_idx in range(0, len(symbols), BATCH_SIZE):
+            batch = symbols[batch_idx : batch_idx + BATCH_SIZE]
+
+            try:
+                request = StockBarsRequest(
+                    symbol_or_symbols=batch,
+                    timeframe=TimeFrame.Minute,
+                    start=start_time,
+                    end=now_et,
+                )
+                bars_response = self._broker._data_client.get_stock_bars(request)
+
+                for symbol in batch:
+                    try:
+                        symbol_bars = bars_response[symbol]
+                    except (KeyError, IndexError):
+                        continue
+
+                    if not symbol_bars:
+                        continue
+
+                    # Convert Alpaca Bar objects to our BarData dataclass
+                    for bar in symbol_bars:
+                        bar_data = BarData(
+                            symbol=symbol,
+                            timestamp=bar.timestamp,
+                            open=Decimal(str(bar.open)),
+                            high=Decimal(str(bar.high)),
+                            low=Decimal(str(bar.low)),
+                            close=Decimal(str(bar.close)),
+                            volume=bar.volume,
+                            vwap=Decimal(str(bar.vwap)) if bar.vwap else None,
+                        )
+                        self._daily_bars[symbol].append(bar_data)
+                        total_bars_loaded += 1
+
+                    # Set latest bar
+                    if self._daily_bars[symbol]:
+                        self._latest_bars[symbol] = self._daily_bars[symbol][-1]
+
+                    # Trim to 100 bars per symbol
+                    if len(self._daily_bars[symbol]) > 100:
+                        self._daily_bars[symbol] = self._daily_bars[symbol][-100:]
+
+            except Exception as e:
+                logger.warning(
+                    f"Failed to preload bars for batch {batch_idx // BATCH_SIZE + 1}: {e}"
+                )
+                continue
+
+        logger.info(
+            f"Historical bar preload complete: {total_bars_loaded} bars "
+            f"for {len(self._daily_bars)} symbols"
+        )
+
+        # Bootstrap ORB opening ranges if we missed the range window (9:30-9:45 AM ET)
+        orb_range_start = time(9, 30)
+        orb_range_end = time(9, 45)
+        current_time = now_et.time()
+
+        if current_time >= orb_range_end:
+            for strategy in self._strategies:
+                if isinstance(strategy, OpeningRangeBreakout) and strategy.is_active:
+                    allowed = strategy.parameters.get("allowed_symbols", [])
+                    for symbol in allowed:
+                        # Skip if range already exists
+                        if strategy.get_opening_range(symbol) is not None:
+                            continue
+
+                        bars = self._daily_bars.get(symbol, [])
+                        # Find bars within the 9:30-9:45 AM ET window
+                        range_bars = []
+                        for bar in bars:
+                            bar_time = bar.timestamp.astimezone(self._et_tz).time()
+                            if orb_range_start <= bar_time < orb_range_end:
+                                range_bars.append(bar)
+
+                        if range_bars:
+                            range_high = max(b.high for b in range_bars)
+                            range_low = min(b.low for b in range_bars)
+                            strategy.update_opening_range(
+                                symbol=symbol,
+                                high=range_high,
+                                low=range_low,
+                                force=True,
+                            )
+                            orb_ranges_built += 1
+
+                    break  # Only one ORB strategy instance
+
+            if orb_ranges_built > 0:
+                logger.info(
+                    f"ORB opening ranges bootstrapped from historical data: "
+                    f"{orb_ranges_built} symbols"
+                )
 
     async def _start_market_data_streaming(self) -> None:
         """
@@ -1766,6 +1893,12 @@ class TradingAgent:
 
         # Start market data streaming (uses scanner results)
         await self._start_market_data_streaming()
+
+        # Preload historical 1-minute bars so indicators (RSI, MACD, etc.) are
+        # available immediately instead of waiting 15-50+ minutes for streaming
+        # bars to accumulate.  Also bootstraps ORB opening ranges if the agent
+        # started after the 9:30-9:45 AM ET range-collection window.
+        self._preload_historical_bars()
 
         # Start instrumentation heartbeat for data reception monitoring
         await get_instrumentation().start_heartbeat()
