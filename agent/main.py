@@ -475,6 +475,7 @@ class TradingAgent:
                         symbol=bar.symbol,
                         high=bar.high,
                         low=bar.low,
+                        force=True,  # time window already validated above
                     )
                 break
 
