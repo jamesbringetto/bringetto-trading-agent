@@ -217,9 +217,7 @@ class CircuitBreaker:
         """
         losses = self._strategy_consecutive_losses.get(strategy_name, 0)
         if losses >= max_consecutive:
-            logger.warning(
-                f"Strategy {strategy_name} hit {losses} consecutive losses - disabling"
-            )
+            logger.warning(f"Strategy {strategy_name} hit {losses} consecutive losses - disabling")
             return True
         return False
 

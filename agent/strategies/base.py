@@ -160,9 +160,7 @@ class BaseStrategy(ABC):
         pass
 
     @abstractmethod
-    def calculate_position_size(
-        self, context: MarketContext, account_value: Decimal
-    ) -> Decimal:
+    def calculate_position_size(self, context: MarketContext, account_value: Decimal) -> Decimal:
         """
         Calculate the position size for a trade.
 

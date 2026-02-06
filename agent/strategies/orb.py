@@ -92,17 +92,13 @@ class OpeningRangeBreakout(BaseStrategy):
         """Check if we're in the valid trading period (after range, before exit)."""
         now = self._get_market_time()
         range_end = time(9, 30 + self.parameters["range_minutes"])
-        exit_time = time(
-            self.parameters["exit_time_hour"], self.parameters["exit_time_minute"]
-        )
+        exit_time = time(self.parameters["exit_time_hour"], self.parameters["exit_time_minute"])
         return range_end <= now.time() < exit_time
 
     def _should_force_exit(self) -> bool:
         """Check if we should force exit all positions."""
         now = self._get_market_time()
-        exit_time = time(
-            self.parameters["exit_time_hour"], self.parameters["exit_time_minute"]
-        )
+        exit_time = time(self.parameters["exit_time_hour"], self.parameters["exit_time_minute"])
         return now.time() >= exit_time
 
     def update_opening_range(
@@ -246,7 +242,10 @@ class OpeningRangeBreakout(BaseStrategy):
 
         # Force exit if past exit time
         if self._should_force_exit():
-            return True, f"Forced exit at {self.parameters['exit_time_hour']}:{self.parameters['exit_time_minute']} ET"
+            return (
+                True,
+                f"Forced exit at {self.parameters['exit_time_hour']}:{self.parameters['exit_time_minute']} ET",
+            )
 
         # Check stop loss
         stop_loss = self.calculate_stop_loss(entry_price, side)
@@ -264,9 +263,7 @@ class OpeningRangeBreakout(BaseStrategy):
 
         return False, ""
 
-    def calculate_position_size(
-        self, context: MarketContext, account_value: Decimal
-    ) -> Decimal:
+    def calculate_position_size(self, context: MarketContext, account_value: Decimal) -> Decimal:
         """Calculate position size based on account value and risk parameters."""
         position_pct = Decimal(self.parameters["position_size_pct"]) / 100
         return account_value * position_pct

@@ -61,9 +61,7 @@ class PositionSizer:
         # Check max position size limit
         max_pct = self._settings.max_position_size_pct
         if position_pct > max_pct:
-            logger.warning(
-                f"Position size {position_pct}% exceeds max {max_pct}%, capping"
-            )
+            logger.warning(f"Position size {position_pct}% exceeds max {max_pct}%, capping")
             position_pct = max_pct
 
         # Calculate dollar amount
@@ -144,9 +142,7 @@ class PositionSizer:
         if dollar_amount > max_position:
             shares = (max_position / current_price).quantize(Decimal("1"))
             dollar_amount = shares * current_price
-            logger.warning(
-                f"Risk-based size ${dollar_amount} exceeds max position, capping"
-            )
+            logger.warning(f"Risk-based size ${dollar_amount} exceeds max position, capping")
 
         position_pct = float(dollar_amount / account_value) * 100
         actual_risk = shares * risk_per_share
@@ -180,7 +176,10 @@ class PositionSizer:
         # Check position size limit
         max_position_pct = self._settings.max_position_size_pct
         if position_size.position_pct > max_position_pct:
-            return False, f"Position {position_size.position_pct:.1f}% exceeds limit {max_position_pct}%"
+            return (
+                False,
+                f"Position {position_size.position_pct:.1f}% exceeds limit {max_position_pct}%",
+            )
 
         # Check total exposure limit (60% max deployed)
         max_deployed_pct = 60.0  # Hardcoded from requirements
@@ -188,7 +187,10 @@ class PositionSizer:
         new_deployed_pct = float(new_total / account_value) * 100
 
         if new_deployed_pct > max_deployed_pct:
-            return False, f"Total exposure {new_deployed_pct:.1f}% would exceed limit {max_deployed_pct}%"
+            return (
+                False,
+                f"Total exposure {new_deployed_pct:.1f}% would exceed limit {max_deployed_pct}%",
+            )
 
         return True, "Position valid"
 

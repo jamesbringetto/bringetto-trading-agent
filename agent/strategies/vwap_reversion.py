@@ -78,9 +78,7 @@ class VWAPReversion(BaseStrategy):
         """Get current time in Eastern timezone."""
         return datetime.now(self._et_tz)
 
-    def _calculate_vwap_deviation(
-        self, current_price: Decimal, vwap: Decimal
-    ) -> float:
+    def _calculate_vwap_deviation(self, current_price: Decimal, vwap: Decimal) -> float:
         """Calculate percentage deviation from VWAP."""
         return float((current_price - vwap) / vwap) * 100
 
@@ -148,7 +146,9 @@ class VWAPReversion(BaseStrategy):
                 ),
                 indicators=indicators,
             )
-            logger.info(f"VWAP BUY signal for {symbol} - deviation: {deviation:.2f}%, RSI: {rsi:.1f}")
+            logger.info(
+                f"VWAP BUY signal for {symbol} - deviation: {deviation:.2f}%, RSI: {rsi:.1f}"
+            )
 
         # Check for overbought (price above VWAP, RSI high)
         elif deviation > deviation_threshold and rsi > self.parameters["rsi_overbought"]:
@@ -172,7 +172,9 @@ class VWAPReversion(BaseStrategy):
                 ),
                 indicators=indicators,
             )
-            logger.info(f"VWAP SELL signal for {symbol} - deviation: {deviation:.2f}%, RSI: {rsi:.1f}")
+            logger.info(
+                f"VWAP SELL signal for {symbol} - deviation: {deviation:.2f}%, RSI: {rsi:.1f}"
+            )
 
         if signal:
             # Store position details for max hold time check
@@ -198,7 +200,10 @@ class VWAPReversion(BaseStrategy):
             hold_time = self._get_market_time() - position.entry_time
             max_hold = timedelta(minutes=self.parameters["max_hold_minutes"])
             if hold_time >= max_hold:
-                return True, f"Max holding time ({self.parameters['max_hold_minutes']} min) exceeded"
+                return (
+                    True,
+                    f"Max holding time ({self.parameters['max_hold_minutes']} min) exceeded",
+                )
 
         # Check stop loss
         stop_loss = self.calculate_stop_loss(entry_price, side)
@@ -215,9 +220,7 @@ class VWAPReversion(BaseStrategy):
 
         return False, ""
 
-    def calculate_position_size(
-        self, context: MarketContext, account_value: Decimal
-    ) -> Decimal:
+    def calculate_position_size(self, context: MarketContext, account_value: Decimal) -> Decimal:
         """Calculate position size based on account value."""
         position_pct = Decimal(self.parameters["position_size_pct"]) / 100
         return account_value * position_pct

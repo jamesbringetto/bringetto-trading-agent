@@ -82,9 +82,7 @@ class EODReversal(BaseStrategy):
         exit_time = time(15, self.parameters["exit_minute"])
         return now.time() >= exit_time
 
-    def _calculate_vwap_deviation(
-        self, current_price: Decimal, vwap: Decimal
-    ) -> float:
+    def _calculate_vwap_deviation(self, current_price: Decimal, vwap: Decimal) -> float:
         """Calculate percentage deviation from VWAP."""
         return float((current_price - vwap) / vwap) * 100
 
@@ -157,11 +155,7 @@ class EODReversal(BaseStrategy):
         min_deviation = self.parameters["vwap_deviation_pct"]
 
         # Overbought reversal - short opportunity
-        if (
-            rsi > self.parameters["rsi_overbought"]
-            and deviation > min_deviation
-            and trend == "up"
-        ):
+        if rsi > self.parameters["rsi_overbought"] and deviation > min_deviation and trend == "up":
             entry_price = current_price
             stop_loss = self.calculate_stop_loss(entry_price, OrderSide.SELL)
             take_profit = self.calculate_take_profit(entry_price, OrderSide.SELL)
@@ -189,9 +183,7 @@ class EODReversal(BaseStrategy):
 
         # Oversold reversal - long opportunity
         elif (
-            rsi < self.parameters["rsi_oversold"]
-            and deviation < -min_deviation
-            and trend == "down"
+            rsi < self.parameters["rsi_oversold"] and deviation < -min_deviation and trend == "down"
         ):
             entry_price = current_price
             stop_loss = self.calculate_stop_loss(entry_price, OrderSide.BUY)
@@ -214,8 +206,7 @@ class EODReversal(BaseStrategy):
                 indicators=indicators,
             )
             logger.info(
-                f"EOD Reversal BUY signal for {symbol} - "
-                f"RSI: {rsi:.1f}, VWAP dev: {deviation:.2f}%"
+                f"EOD Reversal BUY signal for {symbol} - RSI: {rsi:.1f}, VWAP dev: {deviation:.2f}%"
             )
 
         return signal
@@ -228,7 +219,10 @@ class EODReversal(BaseStrategy):
 
         # Force exit before market close
         if self._should_force_exit():
-            return True, f"Forced exit at 3:{self.parameters['exit_minute']} PM ET before market close"
+            return (
+                True,
+                f"Forced exit at 3:{self.parameters['exit_minute']} PM ET before market close",
+            )
 
         # Check stop loss
         stop_loss = self.calculate_stop_loss(entry_price, side)
@@ -246,9 +240,7 @@ class EODReversal(BaseStrategy):
 
         return False, ""
 
-    def calculate_position_size(
-        self, context: MarketContext, account_value: Decimal
-    ) -> Decimal:
+    def calculate_position_size(self, context: MarketContext, account_value: Decimal) -> Decimal:
         """Calculate position size based on account value."""
         position_pct = Decimal(self.parameters["position_size_pct"]) / 100
         return account_value * position_pct

@@ -29,9 +29,7 @@ def get_async_engine():
     """Create and return an async database engine."""
     settings = get_settings()
     # Convert postgresql:// to postgresql+asyncpg://
-    database_url = str(settings.database_url).replace(
-        "postgresql://", "postgresql+asyncpg://"
-    )
+    database_url = str(settings.database_url).replace("postgresql://", "postgresql+asyncpg://")
     return create_async_engine(
         database_url,
         pool_pre_ping=True,

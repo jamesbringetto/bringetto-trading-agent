@@ -39,7 +39,9 @@ class TradeMetrics:
         """Calculate trading expectancy."""
         if self.win_rate is None or self.avg_win is None or self.avg_loss is None:
             return None
-        return (self.win_rate * float(self.avg_win)) - ((1 - self.win_rate) * abs(float(self.avg_loss)))
+        return (self.win_rate * float(self.avg_win)) - (
+            (1 - self.win_rate) * abs(float(self.avg_loss))
+        )
 
 
 @dataclass
@@ -87,9 +89,7 @@ class MetricsCollector:
         """
         # Initialize strategy metrics if needed
         if strategy_name not in self._strategy_metrics:
-            self._strategy_metrics[strategy_name] = StrategyMetrics(
-                strategy_name=strategy_name
-            )
+            self._strategy_metrics[strategy_name] = StrategyMetrics(strategy_name=strategy_name)
 
         sm = self._strategy_metrics[strategy_name]
         sm.last_trade_time = datetime.utcnow()
@@ -127,18 +127,22 @@ class MetricsCollector:
 
         # Store trade history
         if trade_data:
-            self._trade_history.append({
-                **trade_data,
-                "strategy": strategy_name,
-                "pnl": float(pnl),
-                "hold_time_seconds": hold_time_seconds,
-                "timestamp": datetime.utcnow().isoformat(),
-            })
+            self._trade_history.append(
+                {
+                    **trade_data,
+                    "strategy": strategy_name,
+                    "pnl": float(pnl),
+                    "hold_time_seconds": hold_time_seconds,
+                    "timestamp": datetime.utcnow().isoformat(),
+                }
+            )
 
         logger.info(
             f"Trade recorded - Strategy: {strategy_name}, P&L: ${pnl:.2f}, "
             f"Total P&L: ${self._overall_metrics.total_pnl:.2f}, "
-            f"Win rate: {self._overall_metrics.win_rate:.1%}" if self._overall_metrics.win_rate else ""
+            f"Win rate: {self._overall_metrics.win_rate:.1%}"
+            if self._overall_metrics.win_rate
+            else ""
         )
 
     def _recalculate_metrics(self, metrics: TradeMetrics) -> None:
@@ -207,9 +211,7 @@ class MetricsCollector:
             },
         }
 
-    def should_disable_strategy(
-        self, strategy_name: str, max_consecutive_losses: int = 5
-    ) -> bool:
+    def should_disable_strategy(self, strategy_name: str, max_consecutive_losses: int = 5) -> bool:
         """Check if a strategy should be disabled due to poor performance."""
         sm = self._strategy_metrics.get(strategy_name)
         if not sm:
@@ -243,9 +245,7 @@ class MetricsCollector:
     def reset_strategy_metrics(self, strategy_name: str) -> None:
         """Reset metrics for a strategy (use with caution)."""
         if strategy_name in self._strategy_metrics:
-            self._strategy_metrics[strategy_name] = StrategyMetrics(
-                strategy_name=strategy_name
-            )
+            self._strategy_metrics[strategy_name] = StrategyMetrics(strategy_name=strategy_name)
             logger.info(f"Metrics reset for strategy: {strategy_name}")
 
     # -------------------------------------------------------------------------
@@ -264,11 +264,13 @@ class MetricsCollector:
             f"Qty: {update.get('filled_qty')} @ ${update.get('filled_avg_price')}"
         )
         # Store in trade history for analysis
-        self._trade_history.append({
-            "type": "fill",
-            "timestamp": datetime.utcnow().isoformat(),
-            **update,
-        })
+        self._trade_history.append(
+            {
+                "type": "fill",
+                "timestamp": datetime.utcnow().isoformat(),
+                **update,
+            }
+        )
 
     def record_rejection(self, update: dict[str, Any]) -> None:
         """
@@ -281,11 +283,13 @@ class MetricsCollector:
             f"Recording rejection: {update.get('symbol')} - Order {update.get('order_id')}"
         )
         # Store rejection for analysis
-        self._trade_history.append({
-            "type": "rejection",
-            "timestamp": datetime.utcnow().isoformat(),
-            **update,
-        })
+        self._trade_history.append(
+            {
+                "type": "rejection",
+                "timestamp": datetime.utcnow().isoformat(),
+                **update,
+            }
+        )
 
     def record_trade_event(self, event: str, update: dict[str, Any]) -> None:
         """
@@ -297,8 +301,10 @@ class MetricsCollector:
         """
         logger.debug(f"Recording trade event: {event} - {update.get('symbol')}")
         # Store all events for comprehensive tracking
-        self._trade_history.append({
-            "type": event,
-            "timestamp": datetime.utcnow().isoformat(),
-            **update,
-        })
+        self._trade_history.append(
+            {
+                "type": event,
+                "timestamp": datetime.utcnow().isoformat(),
+                **update,
+            }
+        )

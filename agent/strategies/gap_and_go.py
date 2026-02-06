@@ -88,17 +88,13 @@ class GapAndGo(BaseStrategy):
         """Check if we're in the valid trading period for gap trading."""
         now = self._get_market_time()
         entry_start = time(9, 30 + self.parameters["entry_delay_minutes"])
-        exit_time = time(
-            self.parameters["exit_time_hour"], self.parameters["exit_time_minute"]
-        )
+        exit_time = time(self.parameters["exit_time_hour"], self.parameters["exit_time_minute"])
         return entry_start <= now.time() < exit_time
 
     def _should_force_exit(self) -> bool:
         """Check if we should force exit all positions."""
         now = self._get_market_time()
-        exit_time = time(
-            self.parameters["exit_time_hour"], self.parameters["exit_time_minute"]
-        )
+        exit_time = time(self.parameters["exit_time_hour"], self.parameters["exit_time_minute"])
         return now.time() >= exit_time
 
     def register_gap(
@@ -230,7 +226,7 @@ class GapAndGo(BaseStrategy):
                     confidence=0.65,
                     reasoning=(
                         f"GAP UP LONG: {symbol} gapped up {gap.gap_percent:.2f}%. "
-                        f"Pulled back {pullback_pct*100:.1f}% from high of ${day_high}. "
+                        f"Pulled back {pullback_pct * 100:.1f}% from high of ${day_high}. "
                         f"Entry: ${current_price}. Target: ${take_profit}, Stop: ${stop_loss}"
                     ),
                     indicators=indicators,
@@ -266,7 +262,7 @@ class GapAndGo(BaseStrategy):
                     confidence=0.65,
                     reasoning=(
                         f"GAP DOWN SHORT: {symbol} gapped down {gap.gap_percent:.2f}%. "
-                        f"Pulled back {pullback_pct*100:.1f}% from low of ${day_low}. "
+                        f"Pulled back {pullback_pct * 100:.1f}% from low of ${day_low}. "
                         f"Entry: ${current_price}. Target: ${take_profit}, Stop: ${stop_loss}"
                     ),
                     indicators=indicators,
@@ -286,7 +282,10 @@ class GapAndGo(BaseStrategy):
 
         # Force exit if past exit time
         if self._should_force_exit():
-            return True, f"Forced exit at {self.parameters['exit_time_hour']}:{self.parameters['exit_time_minute']} ET"
+            return (
+                True,
+                f"Forced exit at {self.parameters['exit_time_hour']}:{self.parameters['exit_time_minute']} ET",
+            )
 
         # Check stop loss
         stop_loss = self.calculate_stop_loss(entry_price, side)
@@ -304,9 +303,7 @@ class GapAndGo(BaseStrategy):
 
         return False, ""
 
-    def calculate_position_size(
-        self, context: MarketContext, account_value: Decimal
-    ) -> Decimal:
+    def calculate_position_size(self, context: MarketContext, account_value: Decimal) -> Decimal:
         """Calculate position size based on account value."""
         position_pct = Decimal(self.parameters["position_size_pct"]) / 100
         return account_value * position_pct

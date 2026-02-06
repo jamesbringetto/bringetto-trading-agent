@@ -18,10 +18,7 @@ def setup_logging() -> None:
     # Console logging format
     if settings.log_format == "json":
         console_format = (
-            "{time:YYYY-MM-DD HH:mm:ss.SSS} | "
-            "{level: <8} | "
-            "{name}:{function}:{line} | "
-            "{message}"
+            "{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {name}:{function}:{line} | {message}"
         )
     else:
         console_format = (
