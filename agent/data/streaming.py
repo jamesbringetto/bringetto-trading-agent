@@ -48,7 +48,7 @@ MAX_RECONNECT_DELAY = 60.0  # seconds
 #   Basic (free):  IEX only, hard WebSocket limit of 30 symbols.
 #   Algo Trader Plus ($99/mo):  SIP feed, unlimited WebSocket symbols.
 # The SIP cap below is a practical client-side cap — Alpaca imposes no limit.
-MAX_SUBSCRIBED_SYMBOLS_IEX = 30    # Alpaca Basic plan hard limit
+MAX_SUBSCRIBED_SYMBOLS_IEX = 30  # Alpaca Basic plan hard limit
 MAX_SUBSCRIBED_SYMBOLS_SIP = 2500  # practical cap (Alpaca: unlimited)
 
 
@@ -122,9 +122,7 @@ class DataStreamer:
 
         # Set subscription cap based on feed tier
         self._max_subscribed = (
-            MAX_SUBSCRIBED_SYMBOLS_SIP
-            if self._feed == DataFeed.SIP
-            else MAX_SUBSCRIBED_SYMBOLS_IEX
+            MAX_SUBSCRIBED_SYMBOLS_SIP if self._feed == DataFeed.SIP else MAX_SUBSCRIBED_SYMBOLS_IEX
         )
 
         self._stream: StockDataStream | None = None
@@ -156,6 +154,32 @@ class DataStreamer:
                 api_key=self._api_key,
                 secret_key=self._secret_key,
                 feed=self._feed,
+            )
+
+    def _resubscribe_all(self) -> None:
+        """Re-register all tracked subscriptions on the current stream.
+
+        Called after creating a new StockDataStream instance during
+        reconnection so that the replacement stream carries the same
+        subscriptions as the one that was destroyed.
+        """
+        if self._stream is None:
+            return
+
+        if self._subscribed_bars:
+            self._stream.subscribe_bars(self._handle_bar, *self._subscribed_bars)
+            logger.info(f"Re-subscribed to {len(self._subscribed_bars)} bar symbols on new stream")
+
+        if self._subscribed_quotes:
+            self._stream.subscribe_quotes(self._handle_quote, *self._subscribed_quotes)
+            logger.info(
+                f"Re-subscribed to {len(self._subscribed_quotes)} quote symbols on new stream"
+            )
+
+        if self._subscribed_trades:
+            self._stream.subscribe_trades(self._handle_trade, *self._subscribed_trades)
+            logger.info(
+                f"Re-subscribed to {len(self._subscribed_trades)} trade symbols on new stream"
             )
 
     def on_disconnect(self, callback: Callable[[str], None]) -> None:
@@ -266,8 +290,7 @@ class DataStreamer:
         if len(new_symbols) > remaining_capacity:
             new_symbols = set(list(new_symbols)[:remaining_capacity])
             logger.warning(
-                f"Capping new bar subscriptions to {len(new_symbols)} "
-                f"(cap: {self._max_subscribed})"
+                f"Capping new bar subscriptions to {len(new_symbols)} (cap: {self._max_subscribed})"
             )
 
         if new_symbols:
@@ -378,10 +401,16 @@ class DataStreamer:
                 # serialises connection attempts across stream types.
                 await conn_mgr.wait_for_clearance(StreamType.STOCK_DATA)
 
+                stream_was_none = self._stream is None
                 self._init_stream()
                 if self._stream is None:
                     logger.error("Failed to initialize stream - stream is None")
                     return
+
+                # If a new stream was created (after disconnect destroyed the
+                # old one), re-register all subscriptions on the fresh instance.
+                if stream_was_none:
+                    self._resubscribe_all()
 
                 self._is_running = True
                 logger.info(
@@ -491,9 +520,14 @@ class DataStreamer:
 
         while True:
             try:
+                stream_was_none = self._stream is None
                 self._init_stream()
                 if self._stream is None:
                     return
+
+                # Re-register subscriptions on a freshly created stream
+                if stream_was_none:
+                    self._resubscribe_all()
 
                 self._is_running = True
                 logger.info("Starting data stream (sync)...")
