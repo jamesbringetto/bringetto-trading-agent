@@ -112,6 +112,13 @@ class MomentumScalp(BaseStrategy):
             or context.rsi is None
             or context.ma_50 is None
         ):
+            logger.debug(
+                f"Momentum | {symbol} | missing indicators "
+                f"(MACD={'ok' if context.macd else 'None'}, "
+                f"Signal={'ok' if context.macd_signal else 'None'}, "
+                f"RSI={'ok' if context.rsi else 'None'}, "
+                f"MA50={'ok' if context.ma_50 else 'None'})"
+            )
             return None
 
         current_price = context.current_price
@@ -122,6 +129,10 @@ class MomentumScalp(BaseStrategy):
 
         # Check RSI is not extreme
         if not (self.parameters["rsi_min"] <= rsi <= self.parameters["rsi_max"]):
+            logger.debug(
+                f"Momentum | {symbol} | RSI {rsi:.1f} outside neutral range "
+                f"[{self.parameters['rsi_min']}, {self.parameters['rsi_max']}]"
+            )
             return None
 
         # Detect MACD crossover
