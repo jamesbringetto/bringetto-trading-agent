@@ -19,6 +19,7 @@ class ValidationResult:
     is_valid: bool
     reason: str
     warnings: list[str]
+    failure_code: str | None = None  # e.g., "market_hours", "buying_power", "max_positions"
 
 
 class TradeValidator:
@@ -98,6 +99,7 @@ class TradeValidator:
                 is_valid=False,
                 reason=hours_reason,
                 warnings=warnings,
+                failure_code="market_hours",
             )
 
         # Validate stop loss is set
@@ -106,6 +108,7 @@ class TradeValidator:
                 is_valid=False,
                 reason="Stop loss not set - all trades MUST have a stop loss",
                 warnings=warnings,
+                failure_code="no_stop_loss",
             )
 
         # Validate stop loss is reasonable
@@ -115,22 +118,32 @@ class TradeValidator:
                     is_valid=False,
                     reason=f"Invalid stop loss ${signal.stop_loss} >= entry ${signal.entry_price} for BUY",
                     warnings=warnings,
+                    failure_code="invalid_stop_loss",
                 )
-            stop_distance_pct = float((signal.entry_price - signal.stop_loss) / signal.entry_price) * 100
+            stop_distance_pct = (
+                float((signal.entry_price - signal.stop_loss) / signal.entry_price) * 100
+            )
         else:
             if signal.stop_loss <= signal.entry_price:
                 return ValidationResult(
                     is_valid=False,
                     reason=f"Invalid stop loss ${signal.stop_loss} <= entry ${signal.entry_price} for SELL",
                     warnings=warnings,
+                    failure_code="invalid_stop_loss",
                 )
-            stop_distance_pct = float((signal.stop_loss - signal.entry_price) / signal.entry_price) * 100
+            stop_distance_pct = (
+                float((signal.stop_loss - signal.entry_price) / signal.entry_price) * 100
+            )
 
         # Warn if stop loss is very tight or very wide
         if stop_distance_pct < 0.3:
-            warnings.append(f"Stop loss very tight ({stop_distance_pct:.2f}%) - may trigger on noise")
+            warnings.append(
+                f"Stop loss very tight ({stop_distance_pct:.2f}%) - may trigger on noise"
+            )
         if stop_distance_pct > 5.0:
-            warnings.append(f"Stop loss very wide ({stop_distance_pct:.2f}%) - large potential loss")
+            warnings.append(
+                f"Stop loss very wide ({stop_distance_pct:.2f}%) - large potential loss"
+            )
 
         # Validate position size
         position_value = account_value * Decimal(signal.position_size_pct / 100)
@@ -141,6 +154,7 @@ class TradeValidator:
                 is_valid=False,
                 reason=f"Position ${position_value:.2f} exceeds max ${max_position_value:.2f}",
                 warnings=warnings,
+                failure_code="position_size",
             )
 
         # Check buying power
@@ -149,6 +163,7 @@ class TradeValidator:
                 is_valid=False,
                 reason=f"Insufficient buying power (need ${position_value:.2f}, have ${buying_power:.2f})",
                 warnings=warnings,
+                failure_code="buying_power",
             )
 
         # Check max concurrent positions
@@ -157,6 +172,7 @@ class TradeValidator:
                 is_valid=False,
                 reason=f"Max concurrent positions ({self._settings.max_concurrent_positions}) reached",
                 warnings=warnings,
+                failure_code="max_positions",
             )
 
         # Check total exposure
@@ -167,6 +183,7 @@ class TradeValidator:
                 is_valid=False,
                 reason=f"Would exceed max exposure (new total ${new_total_exposure:.2f} > max ${max_exposure:.2f})",
                 warnings=warnings,
+                failure_code="max_exposure",
             )
 
         # Check risk/reward ratio
@@ -185,6 +202,7 @@ class TradeValidator:
                 is_valid=False,
                 reason=f"Price ${signal.entry_price} below minimum ${TradingConstants.MIN_STOCK_PRICE}",
                 warnings=warnings,
+                failure_code="min_price",
             )
 
         logger.debug(

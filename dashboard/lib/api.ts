@@ -245,15 +245,52 @@ export interface StrategyEvaluation {
   signal: Record<string, unknown> | null;
 }
 
+// Funnel data for the decision pipeline
+export interface FunnelData {
+  skipped_no_data?: number;  // Only in aggregate
+  signal_generated: number;
+  blocked_pdt: number;
+  blocked_risk_validation: number;
+  blocked_position_size: number;
+  orders_submitted: number;
+  orders_failed: number;
+  orders_filled: number;
+  trades_closed: number;
+  trades_won: number;
+  trades_lost: number;
+}
+
+export interface RiskRejectionBreakdown {
+  market_hours: number;
+  no_stop_loss: number;
+  invalid_stop_loss: number;
+  position_size: number;
+  buying_power: number;
+  max_positions: number;
+  max_exposure: number;
+  min_price: number;
+  [key: string]: number;  // Index signature for Record<string, number> compatibility
+}
+
+export interface StrategyEvaluationStats {
+  total: number;
+  accepted: number;
+  rejected: number;
+  funnel?: FunnelData;
+  risk_rejection_breakdown?: Record<string, number>;
+}
+
 export interface EvaluationSummary {
   total_evaluations: number;
   accepted: number;
   rejected: number;
   skipped: number;
   acceptance_rate: number;
-  by_strategy: Record<string, { total: number; accepted: number; rejected: number }>;
+  by_strategy: Record<string, StrategyEvaluationStats>;
   by_symbol: Record<string, number>;
   time_window_minutes: number;
+  funnel?: FunnelData;
+  risk_rejection_breakdown?: RiskRejectionBreakdown;
 }
 
 export interface InstrumentationStatus {
