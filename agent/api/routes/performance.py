@@ -158,6 +158,31 @@ async def get_strategy_performance() -> list[StrategyPerformanceResponse]:
     state = get_agent_state()
     strategies = state.get("strategies", [])
 
+    # Build per-strategy unrealized P&L and open position counts from broker
+    broker = state.get("broker")
+    strategy_unrealized_pnl: dict[str, float] = {}
+    strategy_open_positions: dict[str, int] = {}
+    try:
+        if broker:
+            positions = broker.get_positions()
+            position_pnl = {p.symbol: float(p.unrealized_pl) for p in positions}
+
+            with get_session() as session:
+                trade_repo = TradeRepository(session)
+                open_trades = trade_repo.get_open_trades()
+                strat_repo = StrategyRepository(session)
+                for trade in open_trades:
+                    strat = strat_repo.get_by_id(trade.strategy_id)
+                    if strat:
+                        name = strat.name
+                        strategy_open_positions[name] = strategy_open_positions.get(name, 0) + 1
+                        if trade.symbol in position_pnl:
+                            strategy_unrealized_pnl[name] = (
+                                strategy_unrealized_pnl.get(name, 0) + position_pnl[trade.symbol]
+                            )
+    except Exception:
+        pass
+
     # Try to get performance data from database
     strategy_performance: dict[str, dict] = {}
     db_strategy_list: list[Any] = []
@@ -189,7 +214,7 @@ async def get_strategy_performance() -> list[StrategyPerformanceResponse]:
                         strategy_performance[s.name] = {
                             "trades_today": trade_count,
                             "win_rate": None,
-                            "pnl_today": 0,
+                            "pnl_today": strategy_unrealized_pnl.get(s.name, 0),
                             "profit_factor": None,
                         }
 
@@ -227,7 +252,7 @@ async def get_strategy_performance() -> list[StrategyPerformanceResponse]:
                 name=s["name"],
                 type=s["type"],
                 is_active=s["is_active"],
-                open_positions=0,
+                open_positions=strategy_open_positions.get(s["name"], 0),
                 trades_today=strategy_performance.get(s["name"], {}).get("trades_today", 0),
                 win_rate=strategy_performance.get(s["name"], {}).get("win_rate"),
                 pnl_today=strategy_performance.get(s["name"], {}).get("pnl_today", 0),
