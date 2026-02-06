@@ -266,6 +266,7 @@ export interface RiskRejectionBreakdown {
   invalid_stop_loss: number;
   position_size: number;
   buying_power: number;
+  daytrading_buying_power: number;  // DTMC prevention
   max_positions: number;
   max_exposure: number;
   min_price: number;

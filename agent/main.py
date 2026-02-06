@@ -697,6 +697,8 @@ class TradingAgent:
             buying_power=account.buying_power,
             current_positions=current_positions,
             current_positions_value=current_positions_value,
+            daytrading_buying_power=account.daytrading_buying_power,
+            is_pattern_day_trader=account.pattern_day_trader,
         )
 
         if not validation.is_valid:

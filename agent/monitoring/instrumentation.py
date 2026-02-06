@@ -153,6 +153,7 @@ class Instrumentation:
             "invalid_stop_loss": 0,
             "position_size": 0,
             "buying_power": 0,
+            "daytrading_buying_power": 0,  # DTMC prevention
             "max_positions": 0,
             "max_exposure": 0,
             "min_price": 0,

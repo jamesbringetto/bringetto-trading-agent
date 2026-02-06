@@ -333,24 +333,57 @@ class AlpacaBroker:
         Handle Alpaca API errors with proper logging for compliance.
 
         Per Alpaca's terms, all order errors must be logged.
+
+        Differentiates between:
+        - PDT (Pattern Day Trader) rejections: Account at risk of PDT flag
+        - DTMC (Day Trade Margin Call) rejections: Insufficient day trading buying power
         """
         error_msg = str(e)
+        error_msg_lower = error_msg.lower()
 
-        # Check for PDT rejection (403)
+        # Check for 403 rejections (PDT or DTMC)
         if isinstance(e, APIError) and hasattr(e, "status_code"):
             if e.status_code == 403:
-                logger.error(
-                    f"PDT PROTECTION: Order rejected for {symbol} - {action}. "
-                    f"Account may be at risk of PDT flag. Error: {error_msg}"
+                # Differentiate DTMC from PDT by parsing error message
+                # DTMC errors typically contain "margin" or "buying power" keywords
+                is_dtmc = any(
+                    keyword in error_msg_lower
+                    for keyword in [
+                        "margin call",
+                        "day trade margin",
+                        "dtmc",
+                        "daytrading_buying_power",
+                        "day trading buying power",
+                        "insufficient day trading",
+                    ]
                 )
-                return OrderResult(
-                    success=False,
-                    order_id=None,
-                    filled_price=None,
-                    filled_qty=None,
-                    status=OrderStatus.REJECTED,
-                    message=f"PDT Protection: {error_msg}",
-                )
+
+                if is_dtmc:
+                    logger.error(
+                        f"DTMC PROTECTION: Order rejected for {symbol} - {action}. "
+                        f"Insufficient day trading buying power. Error: {error_msg}"
+                    )
+                    return OrderResult(
+                        success=False,
+                        order_id=None,
+                        filled_price=None,
+                        filled_qty=None,
+                        status=OrderStatus.REJECTED,
+                        message=f"DTMC Protection: {error_msg}",
+                    )
+                else:
+                    logger.error(
+                        f"PDT PROTECTION: Order rejected for {symbol} - {action}. "
+                        f"Account may be at risk of PDT flag. Error: {error_msg}"
+                    )
+                    return OrderResult(
+                        success=False,
+                        order_id=None,
+                        filled_price=None,
+                        filled_qty=None,
+                        status=OrderStatus.REJECTED,
+                        message=f"PDT Protection: {error_msg}",
+                    )
             elif e.status_code == 422:
                 logger.error(f"Invalid order for {symbol}: {error_msg}")
             elif e.status_code == 429:

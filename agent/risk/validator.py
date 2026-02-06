@@ -76,6 +76,8 @@ class TradeValidator:
         buying_power: Decimal,
         current_positions: int,
         current_positions_value: Decimal,
+        daytrading_buying_power: Decimal | None = None,
+        is_pattern_day_trader: bool = False,
     ) -> ValidationResult:
         """
         Validate a trading signal before execution.
@@ -83,9 +85,11 @@ class TradeValidator:
         Args:
             signal: The strategy signal to validate
             account_value: Current account equity
-            buying_power: Available buying power
+            buying_power: Available buying power (max of regt_buying_power, daytrading_buying_power)
             current_positions: Number of current open positions
             current_positions_value: Total value of current positions
+            daytrading_buying_power: Day trading specific buying power (4x margin for PDT accounts)
+            is_pattern_day_trader: Whether account is flagged as Pattern Day Trader
 
         Returns:
             ValidationResult with validation status
@@ -158,7 +162,22 @@ class TradeValidator:
             )
 
         # Check buying power
-        if position_value > buying_power:
+        # For PDT accounts, validate against daytrading_buying_power to prevent DTMC
+        if is_pattern_day_trader and daytrading_buying_power is not None:
+            if position_value > daytrading_buying_power:
+                logger.warning(
+                    f"DTMC Prevention: Position ${position_value:.2f} exceeds "
+                    f"daytrading_buying_power ${daytrading_buying_power:.2f} "
+                    f"(regt buying_power: ${buying_power:.2f})"
+                )
+                return ValidationResult(
+                    is_valid=False,
+                    reason=f"Insufficient day trading buying power (need ${position_value:.2f}, "
+                    f"have ${daytrading_buying_power:.2f} DT BP, ${buying_power:.2f} RegT BP)",
+                    warnings=warnings,
+                    failure_code="daytrading_buying_power",
+                )
+        elif position_value > buying_power:
             return ValidationResult(
                 is_valid=False,
                 reason=f"Insufficient buying power (need ${position_value:.2f}, have ${buying_power:.2f})",
