@@ -119,6 +119,9 @@ class TradingAgent:
         self._strategies = []
         self._init_strategies()
 
+        # Strategy data feed state
+        self._premarket_gaps_scanned_today = False
+
         # State
         self._is_running = False
         self._shutdown_event = asyncio.Event()
@@ -438,9 +441,155 @@ class TradingAgent:
         if len(self._daily_bars[bar.symbol]) > 100:
             self._daily_bars[bar.symbol] = self._daily_bars[bar.symbol][-100:]
 
+        # Feed bar data to ORB strategy for opening range collection (9:30-9:45 AM ET)
+        self._feed_opening_range_data(bar)
+
+        # Feed post-open price action to Gap and Go strategy for pullback detection
+        self._feed_gap_price_action(bar)
+
     def _on_quote_data(self, quote: QuoteData) -> None:
         """Handle incoming quote data from streaming."""
         self._latest_quotes[quote.symbol] = quote
+
+    def _feed_opening_range_data(self, bar: BarData) -> None:
+        """Feed bar data to ORB strategy during the opening range window (9:30-9:45 AM ET).
+
+        During the opening range collection window, forwards bar high/low to the
+        ORB strategy's update_opening_range() so it can accumulate the range.
+        This method is idempotent — safe to call on every bar.
+        """
+        now = self._get_market_time()
+        current_time = now.time()
+
+        # Only during range collection window (9:30-9:45 AM ET)
+        range_start = time(9, 30)
+        range_end = time(9, 45)
+        if not (range_start <= current_time < range_end):
+            return
+
+        for strategy in self._strategies:
+            if isinstance(strategy, OpeningRangeBreakout) and strategy.is_active:
+                if bar.symbol in strategy.parameters.get("allowed_symbols", []):
+                    strategy.update_opening_range(
+                        symbol=bar.symbol,
+                        high=bar.high,
+                        low=bar.low,
+                    )
+                break
+
+    def _feed_gap_price_action(self, bar: BarData) -> None:
+        """Feed post-open price action to Gap and Go strategy.
+
+        After market open, the Gap and Go strategy needs to track the day's
+        high/low for each symbol to detect pullback entries. This method
+        forwards bar data to update_price_action(). Idempotent.
+        """
+        now = self._get_market_time()
+        current_time = now.time()
+
+        # Only after market open (9:30 AM ET)
+        if current_time < time(9, 30):
+            return
+
+        for strategy in self._strategies:
+            if isinstance(strategy, GapAndGo) and strategy.is_active:
+                # Only feed price action for symbols in the universe with registered gaps
+                if (
+                    bar.symbol in strategy.parameters.get("allowed_symbols", [])
+                    and strategy.get_gap(bar.symbol) is not None
+                ):
+                    strategy.update_price_action(
+                        symbol=bar.symbol,
+                        high=bar.high,
+                        low=bar.low,
+                    )
+                break
+
+    async def _scan_premarket_gaps(self) -> None:
+        """Scan for pre-market gaps before market open.
+
+        Fetches previous day's closing prices and current pre-market quotes
+        for all symbols in Gap and Go's universe. Registers any gaps >= min_gap_pct.
+
+        This method is idempotent — calling it multiple times on the same day
+        will just overwrite gap registrations with updated data.
+        """
+        gap_strategy = None
+        for strategy in self._strategies:
+            if isinstance(strategy, GapAndGo) and strategy.is_active:
+                gap_strategy = strategy
+                break
+
+        if not gap_strategy:
+            return
+
+        symbols = gap_strategy.parameters.get("allowed_symbols", [])
+        if not symbols:
+            logger.warning("Gap and Go has no allowed_symbols — skipping pre-market scan")
+            return
+
+        min_gap_pct = gap_strategy.parameters.get("min_gap_pct", 3.0)
+        registered_count = 0
+
+        logger.info(f"Scanning {len(symbols)} symbols for pre-market gaps (min {min_gap_pct}%)...")
+
+        for symbol in symbols:
+            try:
+                # Try snapshot first — gives previous close, current quote, and volume
+                snapshot = self._broker.get_snapshot(symbol)
+                prev_close = None
+                premarket_price = None
+                premarket_volume = 0
+
+                if snapshot:
+                    prev_close = snapshot.get("previous_close")
+                    premarket_volume = snapshot.get("daily_volume", 0) or 0
+                    # Use latest trade price or ask from snapshot
+                    if snapshot.get("ask") and snapshot["ask"] > 0:
+                        premarket_price = Decimal(str(snapshot["ask"]))
+                    elif snapshot.get("latest_price") and snapshot["latest_price"] > 0:
+                        premarket_price = Decimal(str(snapshot["latest_price"]))
+
+                # Fall back to historical bars for previous close
+                if prev_close is None:
+                    prev_close = self._broker.get_previous_close(symbol)
+
+                if prev_close is None:
+                    continue
+
+                # Fall back to streaming quotes or API for current price
+                if premarket_price is None:
+                    quote = self._latest_quotes.get(symbol)
+                    if quote and quote.ask and quote.ask > 0:
+                        premarket_price = quote.ask
+                    else:
+                        api_quote = self._broker.get_latest_quote(symbol)
+                        if api_quote and api_quote.get("ask") and api_quote["ask"] > 0:
+                            premarket_price = Decimal(str(api_quote["ask"]))
+
+                if premarket_price is None or premarket_price <= 0:
+                    continue
+
+                gap_pct = abs(float(premarket_price - prev_close) / float(prev_close) * 100)
+
+                if gap_pct >= min_gap_pct:
+                    result = gap_strategy.register_gap(
+                        symbol=symbol,
+                        previous_close=prev_close,
+                        premarket_price=premarket_price,
+                        premarket_volume=premarket_volume,
+                    )
+                    if result is not None:
+                        registered_count += 1
+
+            except Exception as e:
+                logger.warning(f"Error scanning gap for {symbol}: {e}")
+
+        self._premarket_gaps_scanned_today = True
+        logger.info(
+            f"Pre-market gap scan complete: {registered_count} gaps registered "
+            f"from {len(symbols)} symbols"
+        )
 
     def _build_market_context(self, symbol: str) -> MarketContext | None:
         """
@@ -1410,6 +1559,9 @@ class TradingAgent:
         # Clear stale order-trade mappings
         self._order_trade_map.clear()
 
+        # Reset pre-market gap scan flag for the new day
+        self._premarket_gaps_scanned_today = False
+
         # Re-run symbol scan for the new trading day
         self._run_symbol_scan()
 
@@ -1625,6 +1777,22 @@ class TradingAgent:
                         now_et = self._get_market_time()
                         if now_et.hour < 10:
                             eod_closed_today = False
+
+                        # Scan for pre-market gaps once per day before Gap and Go's
+                        # trading window (9:35 AM ET). Runs during pre-market or early
+                        # regular session to register qualifying gaps.
+                        if not self._premarket_gaps_scanned_today:
+                            now_et = self._get_market_time()
+                            # Scan anytime from pre-market through 9:34 AM ET
+                            if now_et.time() < time(9, 35):
+                                await self._scan_premarket_gaps()
+                            else:
+                                # Past the window — mark as done to avoid repeated checks
+                                self._premarket_gaps_scanned_today = True
+                                logger.info(
+                                    "Pre-market gap scan window passed (after 9:35 AM) — "
+                                    "skipping for today"
+                                )
 
                         # Run intraday rescan if enough time has passed
                         if self._should_rescan():

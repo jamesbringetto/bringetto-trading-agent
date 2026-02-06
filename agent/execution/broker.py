@@ -29,7 +29,7 @@ from alpaca.common.exceptions import APIError
 from alpaca.data.enums import DataFeed
 from alpaca.data.historical import StockHistoricalDataClient
 from alpaca.data.live import StockDataStream
-from alpaca.data.requests import StockBarsRequest, StockLatestQuoteRequest
+from alpaca.data.requests import StockBarsRequest, StockLatestQuoteRequest, StockSnapshotRequest
 from alpaca.data.timeframe import TimeFrame
 from alpaca.trading.client import TradingClient
 from alpaca.trading.enums import OrderSide as AlpacaOrderSide
@@ -1306,6 +1306,99 @@ class AlpacaBroker:
         except Exception as e:
             logger.error(f"Failed to get bars for {symbol}: {e}")
             return []
+
+    def get_snapshot(self, symbol: str) -> dict[str, Any] | None:
+        """Get a snapshot for a symbol including latest quote, trade, and bars.
+
+        Returns previous daily bar close, latest quote, and minute bar volume.
+        Useful for pre-market gap detection.
+
+        Args:
+            symbol: Stock symbol
+
+        Returns:
+            Dict with snapshot data, or None if unavailable
+        """
+        try:
+            request = StockSnapshotRequest(symbol_or_symbols=symbol)
+            snapshots = self._data_client.get_stock_snapshot(request)
+            snapshot = snapshots.get(symbol)
+            if snapshot is None:
+                return None
+
+            result: dict[str, Any] = {"symbol": symbol}
+
+            # Previous daily bar (gives us yesterday's close)
+            if snapshot.previous_daily_bar:
+                result["previous_close"] = Decimal(str(snapshot.previous_daily_bar.close))
+                result["previous_volume"] = snapshot.previous_daily_bar.volume
+
+            # Latest quote
+            if snapshot.latest_quote:
+                result["bid"] = float(snapshot.latest_quote.bid_price)
+                result["ask"] = float(snapshot.latest_quote.ask_price)
+
+            # Latest trade
+            if snapshot.latest_trade:
+                result["latest_price"] = float(snapshot.latest_trade.price)
+                result["latest_size"] = snapshot.latest_trade.size
+
+            # Daily bar (today's accumulated data)
+            if snapshot.daily_bar:
+                result["daily_volume"] = snapshot.daily_bar.volume
+                result["daily_close"] = float(snapshot.daily_bar.close)
+
+            # Minute bar
+            if snapshot.minute_bar:
+                result["minute_volume"] = snapshot.minute_bar.volume
+
+            return result
+
+        except Exception as e:
+            logger.error(f"Failed to get snapshot for {symbol}: {e}")
+            return None
+
+    def get_previous_close(self, symbol: str) -> Decimal | None:
+        """Get the previous trading day's closing price for a symbol.
+
+        Uses the historical bars API with a 1-day timeframe to fetch the most
+        recent daily bar, which gives us the previous close.
+
+        Args:
+            symbol: Stock symbol
+
+        Returns:
+            Previous close price as Decimal, or None if unavailable
+        """
+        try:
+            from datetime import timedelta
+
+            # Look back 5 calendar days to account for weekends/holidays
+            end = datetime.now(ET)
+            start = end - timedelta(days=5)
+
+            request = StockBarsRequest(
+                symbol_or_symbols=symbol,
+                timeframe=TimeFrame.Day,
+                start=start,
+                end=end,
+            )
+            bars = self._data_client.get_stock_bars(request)
+            bar_list = list(bars[symbol])
+
+            if not bar_list:
+                logger.warning(f"No daily bars found for {symbol}")
+                return None
+
+            # The last bar is the most recent completed trading day
+            last_bar = bar_list[-1]
+            close_price = Decimal(str(last_bar.close))
+            logger.debug(f"Previous close for {symbol}: ${close_price}")
+            return close_price
+
+        except Exception as e:
+            logger.error(f"Failed to get previous close for {symbol}: {e}")
+            return None
 
     def is_market_open(self) -> bool:
         """Check if the market is currently open."""
