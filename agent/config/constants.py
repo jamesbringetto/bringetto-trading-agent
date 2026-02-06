@@ -795,25 +795,28 @@ class TradingConstants:
     ORB_TAKE_PROFIT_PCT: float = 2.0
 
     # VWAP Strategy
-    VWAP_DEVIATION_THRESHOLD_PCT: float = 1.5
-    VWAP_RSI_OVERSOLD: float = 30.0
-    VWAP_RSI_OVERBOUGHT: float = 70.0
+    # Paper trading: relaxed from 1.5/30/70 to generate more signals for data collection
+    VWAP_DEVIATION_THRESHOLD_PCT: float = 1.0
+    VWAP_RSI_OVERSOLD: float = 35.0
+    VWAP_RSI_OVERBOUGHT: float = 65.0
     VWAP_TARGET_PCT: float = 0.2
     VWAP_STOP_LOSS_PCT: float = 0.8
     VWAP_MAX_HOLD_MINUTES: int = 60
 
     # Momentum Strategy
     MOMENTUM_VOLUME_RATIO: float = 1.5
-    MOMENTUM_RSI_MIN: float = 40.0
-    MOMENTUM_RSI_MAX: float = 60.0
+    # Paper trading: widened from 40/60 to catch more crossovers
+    MOMENTUM_RSI_MIN: float = 35.0
+    MOMENTUM_RSI_MAX: float = 65.0
     MOMENTUM_TAKE_PROFIT_PCT: float = 1.5
     MOMENTUM_STOP_LOSS_PCT: float = 0.6
 
     # Gap & Go Strategy
-    GAP_MIN_PCT: float = 3.0
+    # Paper trading: relaxed from 3.0%/200k to find more gap candidates
+    GAP_MIN_PCT: float = 1.5
     GAP_ENTRY_DELAY_MINUTES: int = 5
     GAP_PULLBACK_PCT: float = 0.5
-    GAP_MIN_PREMARKET_VOLUME: int = 200_000
+    GAP_MIN_PREMARKET_VOLUME: int = 50_000
     GAP_STOP_LOSS_PCT: float = 2.0
     GAP_MAX_PROFIT_PCT: float = 5.0
     GAP_EXIT_TIME_HOUR: int = 10
@@ -821,9 +824,10 @@ class TradingConstants:
 
     # EOD Reversal Strategy
     EOD_START_HOUR: int = 15
-    EOD_RSI_OVERSOLD: float = 25.0
-    EOD_RSI_OVERBOUGHT: float = 75.0
-    EOD_VWAP_DEVIATION_PCT: float = 2.0
+    # Paper trading: relaxed from 25/75/2.0 to generate signals during the short EOD window
+    EOD_RSI_OVERSOLD: float = 30.0
+    EOD_RSI_OVERBOUGHT: float = 70.0
+    EOD_VWAP_DEVIATION_PCT: float = 1.5
     EOD_STOP_LOSS_PCT: float = 1.0
     EOD_TAKE_PROFIT_PCT: float = 1.5
     EOD_EXIT_MINUTE: int = 55  # Exit at 3:55 PM
