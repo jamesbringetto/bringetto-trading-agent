@@ -94,14 +94,14 @@ export default function Dashboard() {
         <StatusCard
           title="Open Positions"
           value={portfolio?.open_positions?.toString() || '0'}
-          subtitle="of 10 max"
+          subtitle={`of ${portfolio?.max_positions ?? 10} max`}
           icon={Activity}
           loading={isLoading}
         />
         <StatusCard
           title="Trades Today"
           value={portfolio?.trades_today?.toString() || '0'}
-          subtitle="of 30 max"
+          subtitle={`of ${portfolio?.max_trades ?? 30} max`}
           icon={Clock}
           loading={isLoading}
         />

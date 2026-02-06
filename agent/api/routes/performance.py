@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from agent.api.auth import require_api_key
 from agent.api.state import get_agent_state
 from agent.config.constants import TradeStatus
+from agent.config.settings import get_settings
 from agent.database import get_session
 from agent.database.repositories import (
     DailySummaryRepository,
@@ -104,6 +105,8 @@ async def get_performance_summary() -> dict[str, Any]:
         except Exception:
             pass
 
+    settings = get_settings()
+
     return {
         "account": {
             "equity": float(account_info.equity) if account_info else 0,
@@ -113,7 +116,8 @@ async def get_performance_summary() -> dict[str, Any]:
         "today": {
             "pnl": daily_pnl,
             "trades": trades_today,
-            "max_trades": daily_stats.get("max_trades", 30),
+            "max_trades": daily_stats.get("max_trades", settings.max_trades_per_day),
+            "max_positions": settings.max_concurrent_positions,
             "open_positions": open_positions,
         },
         "circuit_breaker": {
