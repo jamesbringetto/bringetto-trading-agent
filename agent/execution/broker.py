@@ -1893,9 +1893,9 @@ class OrderUpdateHandler:
 
         while self._reconnect_attempts < self._max_reconnect_attempts:
             try:
-                # Reset stream on reconnect
+                # Reset stream on reconnect — close old connection first
                 if self._reconnect_attempts > 0:
-                    self._trading_stream = None
+                    await self._close_trading_stream()
                     logger.info(
                         f"Reconnecting to trading stream "
                         f"(attempt {self._reconnect_attempts + 1}/{self._max_reconnect_attempts})"
@@ -1908,7 +1908,8 @@ class OrderUpdateHandler:
 
             except Exception as e:
                 self._reconnect_attempts += 1
-                logger.error(f"Trading stream disconnected: {e}")
+                error_msg = str(e)
+                logger.error(f"Trading stream disconnected: {error_msg}")
 
                 if self._reconnect_attempts >= self._max_reconnect_attempts:
                     logger.critical(
@@ -1917,9 +1918,21 @@ class OrderUpdateHandler:
                     )
                     raise
 
+                # Detect "connection limit exceeded" — use longer backoff
+                is_connection_limit = "connection limit" in error_msg.lower()
+
                 # Exponential backoff: 1s, 2s, 4s, 8s, ... up to 60s
                 delay = min(2**self._reconnect_attempts, 60)
-                logger.warning(f"Reconnecting in {delay} seconds...")
+                if is_connection_limit:
+                    delay = max(delay, 30)
+
+                logger.warning(
+                    f"Reconnecting in {delay} seconds..."
+                    f"{' [connection limit — extended backoff]' if is_connection_limit else ''}"
+                )
+
+                # Close old stream before sleeping to release the connection
+                await self._close_trading_stream()
                 await asyncio.sleep(delay)
 
                 # Notify reconnect callbacks
@@ -1928,6 +1941,19 @@ class OrderUpdateHandler:
                         callback()
                     except Exception as cb_error:
                         logger.error(f"Error in reconnect callback: {cb_error}")
+
+    async def _close_trading_stream(self) -> None:
+        """Close the current trading stream and release the connection."""
+        if self._trading_stream is not None:
+            try:
+                await self._trading_stream.stop()
+            except Exception as close_err:
+                logger.debug(
+                    f"Error closing trading stream (expected during reconnect): {close_err}"
+                )
+            finally:
+                self._trading_stream = None
+                self._is_running = False
 
     def run_sync(self) -> None:
         """Run the trading stream synchronously (blocking)."""
@@ -1947,11 +1973,9 @@ class OrderUpdateHandler:
 
     async def stop(self) -> None:
         """Stop the trading stream."""
-        if self._trading_stream and self._is_running:
-            await self._trading_stream.stop()
-            self._is_running = False
-            self._is_authenticated = False
-            logger.info("Trading stream stopped")
+        self._is_authenticated = False
+        await self._close_trading_stream()
+        logger.info("Trading stream stopped")
 
     def is_running(self) -> bool:
         """Check if the stream is running."""

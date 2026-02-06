@@ -9,6 +9,7 @@ Compliance Notes:
 """
 
 import asyncio
+import contextlib
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
@@ -27,6 +28,11 @@ from agent.monitoring.instrumentation import get_instrumentation
 MAX_RECONNECT_ATTEMPTS = 10
 INITIAL_RECONNECT_DELAY = 1.0  # seconds
 MAX_RECONNECT_DELAY = 60.0  # seconds
+# When Alpaca returns "connection limit exceeded", old connections haven't
+# expired on their side yet.  Use a longer floor delay to avoid a hot retry
+# loop that will never succeed.
+CONNECTION_LIMIT_BACKOFF = 30.0  # seconds
+MAX_SUBSCRIBED_SYMBOLS = 500  # cap per-type to avoid stream overload
 
 
 @dataclass
@@ -214,40 +220,97 @@ class DataStreamer:
         self._trade_callbacks.append(callback)
 
     async def subscribe_bars(self, symbols: list[str]) -> None:
-        """Subscribe to bar data for symbols."""
+        """Subscribe to bar data for symbols (capped at MAX_SUBSCRIBED_SYMBOLS)."""
         self._init_stream()
         if self._stream is None:
             return
 
         new_symbols = set(symbols) - self._subscribed_bars
+
+        # Enforce subscription cap to avoid stream overload
+        remaining_capacity = MAX_SUBSCRIBED_SYMBOLS - len(self._subscribed_bars)
+        if remaining_capacity <= 0:
+            logger.warning(
+                f"Bar subscription cap reached ({MAX_SUBSCRIBED_SYMBOLS}), "
+                f"ignoring {len(new_symbols)} new symbols"
+            )
+            return
+
+        if len(new_symbols) > remaining_capacity:
+            new_symbols = set(list(new_symbols)[:remaining_capacity])
+            logger.warning(
+                f"Capping new bar subscriptions to {len(new_symbols)} "
+                f"(cap: {MAX_SUBSCRIBED_SYMBOLS})"
+            )
+
         if new_symbols:
             self._stream.subscribe_bars(self._handle_bar, *new_symbols)
             self._subscribed_bars.update(new_symbols)
-            logger.info(f"Subscribed to bars: {new_symbols}")
+            logger.info(
+                f"Subscribed to bars: {len(new_symbols)} symbols (total: {len(self._subscribed_bars)})"
+            )
 
     async def subscribe_quotes(self, symbols: list[str]) -> None:
-        """Subscribe to quote data for symbols."""
+        """Subscribe to quote data for symbols (capped at MAX_SUBSCRIBED_SYMBOLS)."""
         self._init_stream()
         if self._stream is None:
             return
 
         new_symbols = set(symbols) - self._subscribed_quotes
+
+        # Enforce subscription cap
+        remaining_capacity = MAX_SUBSCRIBED_SYMBOLS - len(self._subscribed_quotes)
+        if remaining_capacity <= 0:
+            logger.warning(
+                f"Quote subscription cap reached ({MAX_SUBSCRIBED_SYMBOLS}), "
+                f"ignoring {len(new_symbols)} new symbols"
+            )
+            return
+
+        if len(new_symbols) > remaining_capacity:
+            new_symbols = set(list(new_symbols)[:remaining_capacity])
+            logger.warning(
+                f"Capping new quote subscriptions to {len(new_symbols)} "
+                f"(cap: {MAX_SUBSCRIBED_SYMBOLS})"
+            )
+
         if new_symbols:
             self._stream.subscribe_quotes(self._handle_quote, *new_symbols)
             self._subscribed_quotes.update(new_symbols)
-            logger.info(f"Subscribed to quotes: {new_symbols}")
+            logger.info(
+                f"Subscribed to quotes: {len(new_symbols)} symbols (total: {len(self._subscribed_quotes)})"
+            )
 
     async def subscribe_trades(self, symbols: list[str]) -> None:
-        """Subscribe to trade data for symbols."""
+        """Subscribe to trade data for symbols (capped at MAX_SUBSCRIBED_SYMBOLS)."""
         self._init_stream()
         if self._stream is None:
             return
 
         new_symbols = set(symbols) - self._subscribed_trades
+
+        # Enforce subscription cap
+        remaining_capacity = MAX_SUBSCRIBED_SYMBOLS - len(self._subscribed_trades)
+        if remaining_capacity <= 0:
+            logger.warning(
+                f"Trade subscription cap reached ({MAX_SUBSCRIBED_SYMBOLS}), "
+                f"ignoring {len(new_symbols)} new symbols"
+            )
+            return
+
+        if len(new_symbols) > remaining_capacity:
+            new_symbols = set(list(new_symbols)[:remaining_capacity])
+            logger.warning(
+                f"Capping new trade subscriptions to {len(new_symbols)} "
+                f"(cap: {MAX_SUBSCRIBED_SYMBOLS})"
+            )
+
         if new_symbols:
             self._stream.subscribe_trades(self._handle_trade, *new_symbols)
             self._subscribed_trades.update(new_symbols)
-            logger.info(f"Subscribed to trades: {new_symbols}")
+            logger.info(
+                f"Subscribed to trades: {len(new_symbols)} symbols (total: {len(self._subscribed_trades)})"
+            )
 
     async def start(self, auto_reconnect: bool = True) -> None:
         """
@@ -315,20 +378,39 @@ class DataStreamer:
                     logger.error(f"Max reconnection attempts ({MAX_RECONNECT_ATTEMPTS}) reached")
                     raise
 
+                # Detect "connection limit exceeded" — old connections haven't
+                # expired on Alpaca's side, so use a longer floor delay.
+                is_connection_limit = "connection limit" in error_msg.lower()
+
                 # Calculate backoff delay with exponential increase
                 delay = min(
                     INITIAL_RECONNECT_DELAY * (2**self._reconnect_attempts), MAX_RECONNECT_DELAY
                 )
+                if is_connection_limit:
+                    delay = max(delay, CONNECTION_LIMIT_BACKOFF)
+
                 self._reconnect_attempts += 1
 
                 logger.warning(
                     f"Reconnecting in {delay:.1f}s "
                     f"(attempt {self._reconnect_attempts}/{MAX_RECONNECT_ATTEMPTS})"
+                    f"{' [connection limit — extended backoff]' if is_connection_limit else ''}"
                 )
 
-                # Reset stream for fresh connection
-                self._stream = None
+                # Explicitly close the old stream before creating a new one
+                # to avoid leaving zombie connections on Alpaca's side
+                await self._close_stream()
                 await asyncio.sleep(delay)
+
+    async def _close_stream(self) -> None:
+        """Close the current stream and release the connection."""
+        if self._stream is not None:
+            try:
+                await self._stream.stop()
+            except Exception as close_err:
+                logger.debug(f"Error closing stream (expected during reconnect): {close_err}")
+            finally:
+                self._stream = None
 
     def run_sync(self, auto_reconnect: bool = True) -> None:
         """
@@ -379,26 +461,35 @@ class DataStreamer:
                     logger.error(f"Max reconnection attempts ({MAX_RECONNECT_ATTEMPTS}) reached")
                     raise
 
+                is_connection_limit = "connection limit" in error_msg.lower()
+
                 delay = min(
                     INITIAL_RECONNECT_DELAY * (2**self._reconnect_attempts), MAX_RECONNECT_DELAY
                 )
+                if is_connection_limit:
+                    delay = max(delay, CONNECTION_LIMIT_BACKOFF)
+
                 self._reconnect_attempts += 1
 
                 logger.warning(
                     f"Reconnecting in {delay:.1f}s "
                     f"(attempt {self._reconnect_attempts}/{MAX_RECONNECT_ATTEMPTS})"
+                    f"{' [connection limit — extended backoff]' if is_connection_limit else ''}"
                 )
 
-                self._stream = None
+                # Close the old stream before creating a new one
+                if self._stream is not None:
+                    with contextlib.suppress(Exception):
+                        self._stream.stop()
+                    self._stream = None
                 time.sleep(delay)
 
     async def stop(self) -> None:
         """Stop the data stream and prevent reconnection."""
         self._should_reconnect = False
-        if self._stream and self._is_running:
-            await self._stream.stop()
-            self._is_running = False
-            logger.info("Data stream stopped")
+        self._is_running = False
+        await self._close_stream()
+        logger.info("Data stream stopped")
 
     def is_running(self) -> bool:
         """Check if the stream is running."""
