@@ -34,7 +34,7 @@ from agent.config.constants import (
 from agent.config.settings import get_settings
 from agent.data.connection_manager import get_connection_manager
 from agent.data.indicators import IndicatorCalculator
-from agent.data.streaming import MAX_SUBSCRIBED_SYMBOLS, BarData, DataStreamer, QuoteData
+from agent.data.streaming import BarData, DataStreamer, QuoteData
 from agent.data.symbol_scanner import SymbolScanner
 from agent.database import get_session
 from agent.database.repositories import (
@@ -652,24 +652,24 @@ class TradingAgent:
         """
         Start market data streaming for all trading symbols.
 
-        Subscribes to bars and quotes for the trading universe, capped at the
-        WebSocket subscription limit (MAX_SUBSCRIBED_SYMBOLS).
+        Subscribes to bars and quotes for the trading universe.  The DataStreamer
+        enforces per-feed subscription caps internally (SIP: 1500, IEX: 500).
         """
         logger.info("Starting market data streaming...")
 
         symbols = self._get_trading_symbols()
 
-        # Cap to streaming limit so we don't silently drop symbols
-        if len(symbols) > MAX_SUBSCRIBED_SYMBOLS:
-            logger.warning(
-                f"Trading universe ({len(symbols)} symbols) exceeds streaming cap "
-                f"({MAX_SUBSCRIBED_SYMBOLS}). Only the first {MAX_SUBSCRIBED_SYMBOLS} "
-                f"will receive real-time data."
-            )
-            symbols = symbols[:MAX_SUBSCRIBED_SYMBOLS]
-
-        # Initialize data streamer
+        # Initialize data streamer (reads feed from settings: SIP or IEX)
         self._data_streamer = DataStreamer()
+
+        # Warn if symbol count exceeds the streamer's cap
+        if len(symbols) > self._data_streamer._max_subscribed:
+            logger.warning(
+                f"Trading universe ({len(symbols)} symbols) exceeds "
+                f"{self._data_streamer._feed.value.upper()} streaming cap "
+                f"({self._data_streamer._max_subscribed}). "
+                f"Excess symbols will be dropped by the streamer."
+            )
 
         # Register callbacks
         self._data_streamer.on_bar(self._on_bar_data)
@@ -1222,13 +1222,6 @@ class TradingAgent:
                 strategy.parameters["allowed_symbols"] = list(self._scanned_symbols)
 
             self._last_rescan_time = datetime.now(self._et_tz)
-
-            if len(self._scanned_symbols) > MAX_SUBSCRIBED_SYMBOLS:
-                logger.warning(
-                    f"Scanner returned {len(self._scanned_symbols)} symbols but "
-                    f"streaming cap is {MAX_SUBSCRIBED_SYMBOLS}. Consider lowering "
-                    f"SCANNER_MAX_SYMBOLS to {MAX_SUBSCRIBED_SYMBOLS}."
-                )
 
             logger.info(
                 f"Symbol scan complete: {len(self._scanned_symbols)} symbols "
@@ -1904,6 +1897,7 @@ async def main() -> None:
     logger.info(f"Environment: {settings.environment}")
     logger.info(f"Trading Mode: {settings.trading_mode}")
     logger.info(f"Paper Trading Capital: ${settings.paper_trading_capital:,.2f}")
+    logger.info(f"Data Feed: {settings.alpaca_data_feed.upper()}")
     logger.info("-" * 60)
     logger.info("24/5 Trading Configuration:")
     logger.info(f"  Extended Hours (4AM-8PM ET): {settings.enable_extended_hours}")

@@ -43,7 +43,13 @@ from agent.monitoring.instrumentation import get_instrumentation
 MAX_RECONNECT_ATTEMPTS = 20  # only counts non-connection-limit failures
 INITIAL_RECONNECT_DELAY = 2.0  # seconds
 MAX_RECONNECT_DELAY = 60.0  # seconds
-MAX_SUBSCRIBED_SYMBOLS = 500  # cap per-type to avoid stream overload
+
+# Per-type subscription caps, based on Alpaca plan limits.
+#   Basic (free):  IEX only, hard WebSocket limit of 30 symbols.
+#   Algo Trader Plus ($99/mo):  SIP feed, unlimited WebSocket symbols.
+# The SIP cap below is a practical client-side cap — Alpaca imposes no limit.
+MAX_SUBSCRIBED_SYMBOLS_IEX = 30    # Alpaca Basic plan hard limit
+MAX_SUBSCRIBED_SYMBOLS_SIP = 2500  # practical cap (Alpaca: unlimited)
 
 
 @dataclass
@@ -97,19 +103,29 @@ class DataStreamer:
     - Configurable data feed (IEX free, SIP paid)
     """
 
-    def __init__(self, feed: DataFeed = DataFeed.IEX):
+    def __init__(self, feed: DataFeed | None = None):
         """
         Initialize the data streamer.
 
         Args:
-            feed: Data feed to use
-                - DataFeed.IEX: Free feed (may be delayed for non-subscribers)
-                - DataFeed.SIP: Real-time feed (requires subscription)
+            feed: Data feed to use.  If None (default), reads from
+                ``ALPACA_DATA_FEED`` setting (``sip`` or ``iex``).
         """
         settings = get_settings()
         self._api_key = settings.alpaca_api_key
         self._secret_key = settings.alpaca_secret_key
-        self._feed = feed
+
+        if feed is None:
+            self._feed = DataFeed.SIP if settings.use_sip_feed else DataFeed.IEX
+        else:
+            self._feed = feed
+
+        # Set subscription cap based on feed tier
+        self._max_subscribed = (
+            MAX_SUBSCRIBED_SYMBOLS_SIP
+            if self._feed == DataFeed.SIP
+            else MAX_SUBSCRIBED_SYMBOLS_IEX
+        )
 
         self._stream: StockDataStream | None = None
         self._is_running = False
@@ -231,7 +247,7 @@ class DataStreamer:
         self._trade_callbacks.append(callback)
 
     async def subscribe_bars(self, symbols: list[str]) -> None:
-        """Subscribe to bar data for symbols (capped at MAX_SUBSCRIBED_SYMBOLS)."""
+        """Subscribe to bar data for symbols (capped at per-feed limit)."""
         self._init_stream()
         if self._stream is None:
             return
@@ -239,10 +255,10 @@ class DataStreamer:
         new_symbols = set(symbols) - self._subscribed_bars
 
         # Enforce subscription cap to avoid stream overload
-        remaining_capacity = MAX_SUBSCRIBED_SYMBOLS - len(self._subscribed_bars)
+        remaining_capacity = self._max_subscribed - len(self._subscribed_bars)
         if remaining_capacity <= 0:
             logger.warning(
-                f"Bar subscription cap reached ({MAX_SUBSCRIBED_SYMBOLS}), "
+                f"Bar subscription cap reached ({self._max_subscribed}), "
                 f"ignoring {len(new_symbols)} new symbols"
             )
             return
@@ -251,7 +267,7 @@ class DataStreamer:
             new_symbols = set(list(new_symbols)[:remaining_capacity])
             logger.warning(
                 f"Capping new bar subscriptions to {len(new_symbols)} "
-                f"(cap: {MAX_SUBSCRIBED_SYMBOLS})"
+                f"(cap: {self._max_subscribed})"
             )
 
         if new_symbols:
@@ -262,7 +278,7 @@ class DataStreamer:
             )
 
     async def subscribe_quotes(self, symbols: list[str]) -> None:
-        """Subscribe to quote data for symbols (capped at MAX_SUBSCRIBED_SYMBOLS)."""
+        """Subscribe to quote data for symbols (capped at per-feed limit)."""
         self._init_stream()
         if self._stream is None:
             return
@@ -270,10 +286,10 @@ class DataStreamer:
         new_symbols = set(symbols) - self._subscribed_quotes
 
         # Enforce subscription cap
-        remaining_capacity = MAX_SUBSCRIBED_SYMBOLS - len(self._subscribed_quotes)
+        remaining_capacity = self._max_subscribed - len(self._subscribed_quotes)
         if remaining_capacity <= 0:
             logger.warning(
-                f"Quote subscription cap reached ({MAX_SUBSCRIBED_SYMBOLS}), "
+                f"Quote subscription cap reached ({self._max_subscribed}), "
                 f"ignoring {len(new_symbols)} new symbols"
             )
             return
@@ -282,7 +298,7 @@ class DataStreamer:
             new_symbols = set(list(new_symbols)[:remaining_capacity])
             logger.warning(
                 f"Capping new quote subscriptions to {len(new_symbols)} "
-                f"(cap: {MAX_SUBSCRIBED_SYMBOLS})"
+                f"(cap: {self._max_subscribed})"
             )
 
         if new_symbols:
@@ -293,7 +309,7 @@ class DataStreamer:
             )
 
     async def subscribe_trades(self, symbols: list[str]) -> None:
-        """Subscribe to trade data for symbols (capped at MAX_SUBSCRIBED_SYMBOLS)."""
+        """Subscribe to trade data for symbols (capped at per-feed limit)."""
         self._init_stream()
         if self._stream is None:
             return
@@ -301,10 +317,10 @@ class DataStreamer:
         new_symbols = set(symbols) - self._subscribed_trades
 
         # Enforce subscription cap
-        remaining_capacity = MAX_SUBSCRIBED_SYMBOLS - len(self._subscribed_trades)
+        remaining_capacity = self._max_subscribed - len(self._subscribed_trades)
         if remaining_capacity <= 0:
             logger.warning(
-                f"Trade subscription cap reached ({MAX_SUBSCRIBED_SYMBOLS}), "
+                f"Trade subscription cap reached ({self._max_subscribed}), "
                 f"ignoring {len(new_symbols)} new symbols"
             )
             return
@@ -313,7 +329,7 @@ class DataStreamer:
             new_symbols = set(list(new_symbols)[:remaining_capacity])
             logger.warning(
                 f"Capping new trade subscriptions to {len(new_symbols)} "
-                f"(cap: {MAX_SUBSCRIBED_SYMBOLS})"
+                f"(cap: {self._max_subscribed})"
             )
 
         if new_symbols:
