@@ -206,7 +206,10 @@ class SymbolScanner:
                 bars_response = self._data_client.get_stock_bars(request)
 
                 for symbol in batch:
-                    symbol_bars = bars_response.get(symbol, [])
+                    try:
+                        symbol_bars = bars_response[symbol]
+                    except (KeyError, IndexError):
+                        continue
                     if not symbol_bars or len(symbol_bars) < 2:
                         continue
 
@@ -427,7 +430,10 @@ class SymbolScanner:
                 bars_response = self._data_client.get_stock_bars(request)
 
                 for symbol in batch:
-                    symbol_bars = bars_response.get(symbol, [])
+                    try:
+                        symbol_bars = bars_response[symbol]
+                    except (KeyError, IndexError):
+                        continue
                     if not symbol_bars or len(symbol_bars) < lookback_days:
                         continue
 
