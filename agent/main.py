@@ -683,6 +683,11 @@ class TradingAgent:
         total_bars_loaded = 0
         orb_ranges_built = 0
 
+        # Pre-compute ORB range window for extracting bars before trimming
+        orb_range_start = time(9, 30)
+        orb_range_end = time(9, 45)
+        orb_range_bars_map: dict[str, list[BarData]] = {}
+
         for batch_idx in range(0, len(symbols), BATCH_SIZE):
             batch = symbols[batch_idx : batch_idx + BATCH_SIZE]
 
@@ -719,6 +724,15 @@ class TradingAgent:
                         self._daily_bars[symbol].append(bar_data)
                         total_bars_loaded += 1
 
+                    # Extract ORB range bars BEFORE trimming — late-start agents
+                    # may have >100 bars, and trimming to the last 100 would
+                    # discard the 9:30-9:45 AM bars needed for range bootstrap.
+                    if symbol not in orb_range_bars_map:
+                        for bar_data in self._daily_bars[symbol]:
+                            bar_time = bar_data.timestamp.astimezone(self._et_tz).time()
+                            if orb_range_start <= bar_time < orb_range_end:
+                                orb_range_bars_map.setdefault(symbol, []).append(bar_data)
+
                     # Set latest bar
                     if self._daily_bars[symbol]:
                         self._latest_bars[symbol] = self._daily_bars[symbol][-1]
@@ -738,9 +752,9 @@ class TradingAgent:
             f"for {len(self._daily_bars)} symbols"
         )
 
-        # Bootstrap ORB opening ranges if we missed the range window (9:30-9:45 AM ET)
-        orb_range_start = time(9, 30)
-        orb_range_end = time(9, 45)
+        # Bootstrap ORB opening ranges if we missed the range window (9:30-9:45 AM ET).
+        # Uses orb_range_bars_map collected BEFORE bars were trimmed to 100, so that
+        # late-start agents still have access to the 9:30-9:45 bars.
         current_time = now_et.time()
 
         if current_time >= orb_range_end:
@@ -752,14 +766,7 @@ class TradingAgent:
                         if strategy.get_opening_range(symbol) is not None:
                             continue
 
-                        bars = self._daily_bars.get(symbol, [])
-                        # Find bars within the 9:30-9:45 AM ET window
-                        range_bars = []
-                        for bar in bars:
-                            bar_time = bar.timestamp.astimezone(self._et_tz).time()
-                            if orb_range_start <= bar_time < orb_range_end:
-                                range_bars.append(bar)
-
+                        range_bars = orb_range_bars_map.get(symbol, [])
                         if range_bars:
                             range_high = max(b.high for b in range_bars)
                             range_low = min(b.low for b in range_bars)
@@ -898,32 +905,8 @@ class TradingAgent:
                 evaluated_count += 1
 
                 if signal:
-                    # Signal generated - record full evaluation with context
-                    inst.record_evaluation(
-                        strategy_name=strategy.name,
-                        symbol=symbol,
-                        evaluation_type="entry",
-                        decision="accepted",
-                        context={
-                            "current_price": context.current_price,
-                            "volume": context.volume,
-                            "vwap": context.vwap,
-                            "rsi": context.rsi,
-                            "macd": context.macd,
-                            "atr": context.atr,
-                            "vix": context.vix,
-                            "bid": context.bid,
-                            "ask": context.ask,
-                        },
-                        signal={
-                            "side": signal.side.value,
-                            "confidence": signal.confidence,
-                            "reasoning": signal.reasoning,
-                            "entry_price": signal.entry_price,
-                            "stop_loss": signal.stop_loss,
-                            "take_profit": signal.take_profit,
-                        },
-                    )
+                    # Note: evaluate_entry() already recorded this acceptance
+                    # via instrumentation — no need to record again here.
                     inst.record_pipeline_event("signal_generated", strategy.name)
                     logger.info(
                         f"Signal generated: {strategy.name} | {symbol} | "
@@ -932,8 +915,8 @@ class TradingAgent:
                     # Validate and execute the trade
                     self._execute_trade(signal, strategy)
                 else:
-                    # No signal - batch rejection count (avoid flooding
-                    # the evaluations list with thousands of entries)
+                    # No signal — evaluate_entry() already recorded individual
+                    # rejections.  We also batch-count here for the pipeline funnel.
                     rejection_counts[strategy.name] = rejection_counts.get(strategy.name, 0) + 1
 
         # Batch-record all rejections per strategy
