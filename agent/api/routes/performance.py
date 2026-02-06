@@ -13,6 +13,7 @@ from agent.database.repositories import (
     DailySummaryRepository,
     StrategyPerformanceRepository,
     StrategyRepository,
+    TradeRepository,
 )
 
 # All endpoints in this router require API key authentication
@@ -80,6 +81,27 @@ async def get_performance_summary() -> dict[str, Any]:
         except Exception:
             pass
 
+    # Get trades_today from circuit breaker, fall back to DB
+    trades_today = daily_stats.get("trades_today", 0)
+    if not trades_today:
+        try:
+            with get_session() as session:
+                trade_repo = TradeRepository(session)
+                today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+                trades_today = trade_repo.get_trade_count(since=today_start)
+        except Exception:
+            pass
+
+    # Get daily P&L from circuit breaker, fall back to equity change
+    daily_pnl = daily_stats.get("daily_pnl", 0)
+    if not daily_pnl and account_info:
+        try:
+            equity = float(account_info.equity)
+            last_equity = float(account_info.last_equity)
+            daily_pnl = equity - last_equity
+        except Exception:
+            pass
+
     return {
         "account": {
             "equity": float(account_info.equity) if account_info else 0,
@@ -87,8 +109,8 @@ async def get_performance_summary() -> dict[str, Any]:
             "buying_power": float(account_info.buying_power) if account_info else 0,
         },
         "today": {
-            "pnl": daily_stats.get("daily_pnl", 0),
-            "trades": daily_stats.get("trades_today", 0),
+            "pnl": daily_pnl,
+            "trades": trades_today,
             "max_trades": daily_stats.get("max_trades", 30),
             "open_positions": open_positions,
         },
@@ -137,14 +159,16 @@ async def get_strategy_performance() -> list[StrategyPerformanceResponse]:
     strategies = state.get("strategies", [])
 
     # Try to get performance data from database
-    strategy_performance = {}
+    strategy_performance: dict[str, dict] = {}
+    db_strategy_list: list[Any] = []
     try:
         with get_session() as session:
             perf_repo = StrategyPerformanceRepository(session)
-            today = datetime.utcnow()
-
-            # Get today's performance for each strategy in the database
             strat_repo = StrategyRepository(session)
+            trade_repo = TradeRepository(session)
+            today = datetime.utcnow()
+            today_start = today.replace(hour=0, minute=0, second=0, microsecond=0)
+
             db_strategies = strat_repo.get_all()
 
             for s in db_strategies:
@@ -154,24 +178,63 @@ async def get_strategy_performance() -> list[StrategyPerformanceResponse]:
                         "trades_today": perf.trades_count,
                         "win_rate": float(perf.win_rate) if perf.win_rate else None,
                         "pnl_today": float(perf.total_pnl),
-                        "profit_factor": float(perf.profit_factor) if perf.profit_factor else None,
+                        "profit_factor": (
+                            float(perf.profit_factor) if perf.profit_factor else None
+                        ),
                     }
+                else:
+                    # Fall back to counting trades from the trades table
+                    trade_count = trade_repo.get_trade_count(strategy_id=s.id, since=today_start)
+                    if trade_count > 0:
+                        strategy_performance[s.name] = {
+                            "trades_today": trade_count,
+                            "win_rate": None,
+                            "pnl_today": 0,
+                            "profit_factor": None,
+                        }
+
+            # If no in-memory strategies, use DB strategies as source
+            if not strategies:
+                db_strategy_list = [
+                    {
+                        "name": s.name,
+                        "type": s.type.value if hasattr(s.type, "value") else str(s.type),
+                        "is_active": s.is_active,
+                    }
+                    for s in db_strategies
+                ]
     except Exception:
         pass
 
-    return [
-        StrategyPerformanceResponse(
-            name=s.name,
-            type=s.strategy_type.value,
-            is_active=s.is_active,
-            open_positions=s.get_open_positions_count(),
-            trades_today=strategy_performance.get(s.name, {}).get("trades_today", 0),
-            win_rate=strategy_performance.get(s.name, {}).get("win_rate"),
-            pnl_today=strategy_performance.get(s.name, {}).get("pnl_today", 0),
-            profit_factor=strategy_performance.get(s.name, {}).get("profit_factor"),
-        )
-        for s in strategies
-    ]
+    # Use in-memory strategies if available, otherwise DB strategies
+    if strategies:
+        return [
+            StrategyPerformanceResponse(
+                name=s.name,
+                type=s.strategy_type.value,
+                is_active=s.is_active,
+                open_positions=s.get_open_positions_count(),
+                trades_today=strategy_performance.get(s.name, {}).get("trades_today", 0),
+                win_rate=strategy_performance.get(s.name, {}).get("win_rate"),
+                pnl_today=strategy_performance.get(s.name, {}).get("pnl_today", 0),
+                profit_factor=strategy_performance.get(s.name, {}).get("profit_factor"),
+            )
+            for s in strategies
+        ]
+    else:
+        return [
+            StrategyPerformanceResponse(
+                name=s["name"],
+                type=s["type"],
+                is_active=s["is_active"],
+                open_positions=0,
+                trades_today=strategy_performance.get(s["name"], {}).get("trades_today", 0),
+                win_rate=strategy_performance.get(s["name"], {}).get("win_rate"),
+                pnl_today=strategy_performance.get(s["name"], {}).get("pnl_today", 0),
+                profit_factor=strategy_performance.get(s["name"], {}).get("profit_factor"),
+            )
+            for s in db_strategy_list
+        ]
 
 
 @router.get("/equity-curve")

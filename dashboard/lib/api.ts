@@ -364,10 +364,11 @@ class ApiClient {
   // --------------------------------------------------------------------------
 
   async getStrategies(): Promise<StrategyPerformance[]> {
-    const response = await this.fetch<any[]>('/api/strategies/');
-    // Transform API response to match expected interface
+    // Use performance endpoint which includes trade counts and P&L data,
+    // not /api/strategies/ which only returns config
+    const response = await this.fetch<any[]>('/api/performance/strategies');
     return response.map((s) => ({
-      strategy_id: s.name, // Use name as ID for now
+      strategy_id: s.name,
       name: s.name,
       strategy_type: s.type,
       is_enabled: s.is_active,
@@ -405,13 +406,15 @@ class ApiClient {
 
   async getPortfolioSummary(): Promise<PortfolioSummary> {
     const summary = await this.fetch<any>('/api/performance/summary');
+    const equity = summary.account?.equity || 0;
+    const dailyPnl = summary.today?.pnl || 0;
     return {
-      account_value: summary.account?.equity || 0,
+      account_value: equity,
       cash: summary.account?.cash || 0,
       buying_power: summary.account?.buying_power || 0,
-      daily_pnl: summary.today?.pnl || 0,
-      daily_pnl_pct: 0, // Calculate from pnl/account_value if needed
-      open_positions: 0, // Get from active positions
+      daily_pnl: dailyPnl,
+      daily_pnl_pct: equity > 0 ? (dailyPnl / equity) * 100 : 0,
+      open_positions: summary.today?.open_positions || 0,
       trades_today: summary.today?.trades || 0,
     };
   }
