@@ -5,6 +5,7 @@ import { api } from '@/lib/api';
 import { formatCurrency } from '@/lib/utils';
 import { ArrowUpRight, ArrowDownRight, Clock } from 'lucide-react';
 import { MarketStatusWidget } from '@/components/market-status';
+import { StrategyTooltip } from '@/components/strategy-tooltip';
 
 export default function TradesPage() {
   const { data: trades, isLoading } = useQuery({
@@ -95,7 +96,9 @@ export default function TradesPage() {
                       {trade.side.toUpperCase()}
                     </span>
                   </td>
-                  <td className="p-4 text-muted-foreground">{trade.strategy_name}</td>
+                  <td className="p-4 text-muted-foreground">
+                    <StrategyTooltip name={trade.strategy_name}>{trade.strategy_name}</StrategyTooltip>
+                  </td>
                   <td className="p-4">{trade.quantity}</td>
                   <td className="p-4">{formatCurrency(trade.entry_price)}</td>
                   <td className="p-4">

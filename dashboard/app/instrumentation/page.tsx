@@ -20,6 +20,7 @@ import {
   ArrowRight,
 } from 'lucide-react';
 import { useTimezoneStore, TIMEZONE_OPTIONS } from '@/lib/timezone-store';
+import { StrategyTooltip } from '@/components/strategy-tooltip';
 
 export default function InstrumentationPage() {
   const { data: status, isLoading, refetch, dataUpdatedAt } = useQuery({
@@ -303,7 +304,7 @@ function EvaluationSummaryCard({ summary }: { summary: EvaluationSummary }) {
                       ) : (
                         <ChevronRight className="h-4 w-4 text-muted-foreground" />
                       )}
-                      <span className="font-medium">{name}</span>
+                      <StrategyTooltip name={name} className="font-medium">{name}</StrategyTooltip>
                     </div>
                     <div className="flex items-center gap-4 text-sm">
                       <span className="text-muted-foreground">
@@ -455,7 +456,7 @@ function EvaluationsList({ evaluations }: { evaluations: StrategyEvaluation[] })
                   {formatTime(evaluation.timestamp)}
                 </td>
                 <td className="px-4 py-2 font-medium">
-                  {evaluation.strategy_name}
+                  <StrategyTooltip name={evaluation.strategy_name}>{evaluation.strategy_name}</StrategyTooltip>
                 </td>
                 <td className="px-4 py-2">{evaluation.symbol}</td>
                 <td className="px-4 py-2 capitalize">{evaluation.evaluation_type}</td>
