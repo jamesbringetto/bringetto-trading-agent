@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
@@ -39,16 +40,33 @@ export default function Dashboard() {
     queryFn: () => api.getTradingStatus(),
   });
 
+  const [limitsDisabledLocal, setLimitsDisabledLocal] = useState<boolean | null>(null);
+
   const toggleLimitsMutation = useMutation({
     mutationFn: (disabled: boolean) => api.toggleTradingLimits(disabled),
+    onMutate: async (disabled: boolean) => {
+      // Cancel outgoing refetches so they don't overwrite our optimistic update
+      await queryClient.cancelQueries({ queryKey: ['portfolio'] });
+      // Optimistically update local state immediately
+      setLimitsDisabledLocal(disabled);
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['portfolio'] });
       queryClient.invalidateQueries({ queryKey: ['status'] });
     },
+    onError: () => {
+      // Revert optimistic update on failure
+      setLimitsDisabledLocal(null);
+    },
+    onSettled: () => {
+      // Sync local override with server state after refetch completes
+      queryClient.invalidateQueries({ queryKey: ['portfolio'] });
+    },
   });
 
   const isLoading = portfolioLoading || strategiesLoading;
-  const limitsDisabled = portfolio?.trading_limits_disabled ?? false;
+  // Use local optimistic state if set, otherwise fall back to server state
+  const limitsDisabled = limitsDisabledLocal ?? portfolio?.trading_limits_disabled ?? false;
 
   const handleLogout = async () => {
     await fetch('/api/auth/logout', { method: 'POST' });
@@ -109,12 +127,11 @@ export default function Dashboard() {
         </div>
         <button
           onClick={() => toggleLimitsMutation.mutate(!limitsDisabled)}
-          disabled={toggleLimitsMutation.isPending}
-          className="flex items-center gap-2 text-sm"
+          className="flex items-center gap-2 text-sm cursor-pointer rounded-md px-3 py-2 transition-colors hover:bg-muted/80"
         >
           {limitsDisabled ? (
             <>
-              <span className="text-amber-600">Limits Off</span>
+              <span className="text-amber-600 font-medium">Limits Off</span>
               <ToggleRight className="h-7 w-7 text-amber-500" />
             </>
           ) : (
