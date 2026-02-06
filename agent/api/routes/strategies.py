@@ -90,7 +90,9 @@ async def get_strategy(strategy_name: str) -> dict[str, Any]:
             if strategy:
                 return {
                     "name": strategy.name,
-                    "type": strategy.type.value if hasattr(strategy.type, "value") else str(strategy.type),
+                    "type": strategy.type.value
+                    if hasattr(strategy.type, "value")
+                    else str(strategy.type),
                     "version": strategy.version,
                     "is_active": strategy.is_active,
                     "is_experimental": strategy.is_experimental,
@@ -124,6 +126,7 @@ async def toggle_strategy(strategy_name: str, request: StrategyToggleRequest) ->
                 strategy.is_active = request.is_active
                 if not request.is_active:
                     from datetime import datetime
+
                     strategy.disabled_reason = "Manually disabled via API"
                     strategy.disabled_at = datetime.now()
                 else:

@@ -68,9 +68,7 @@ class MomentumScalp(BaseStrategy):
         """Get current time in Eastern timezone."""
         return datetime.now(self._et_tz)
 
-    def _detect_macd_crossover(
-        self, symbol: str, macd: float, macd_signal: float
-    ) -> str | None:
+    def _detect_macd_crossover(self, symbol: str, macd: float, macd_signal: float) -> str | None:
         """
         Detect MACD crossover.
         Returns 'bullish', 'bearish', or None.
@@ -222,9 +220,7 @@ class MomentumScalp(BaseStrategy):
 
         return False, ""
 
-    def calculate_position_size(
-        self, context: MarketContext, account_value: Decimal
-    ) -> Decimal:
+    def calculate_position_size(self, context: MarketContext, account_value: Decimal) -> Decimal:
         """Calculate position size based on account value."""
         position_pct = Decimal(self.parameters["position_size_pct"]) / 100
         return account_value * position_pct

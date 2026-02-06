@@ -103,12 +103,8 @@ async def get_time_of_day_performance(
                 select(
                     extract("hour", Trade.entry_time).label("hour"),
                     func.count(Trade.id).label("total_trades"),
-                    func.sum(
-                        func.case((Trade.pnl > 0, 1), else_=0)
-                    ).label("winning_trades"),
-                    func.sum(
-                        func.case((Trade.pnl < 0, 1), else_=0)
-                    ).label("losing_trades"),
+                    func.sum(func.case((Trade.pnl > 0, 1), else_=0)).label("winning_trades"),
+                    func.sum(func.case((Trade.pnl < 0, 1), else_=0)).label("losing_trades"),
                     func.sum(Trade.pnl).label("total_pnl"),
                 )
                 .where(
@@ -128,9 +124,7 @@ async def get_time_of_day_performance(
                     winning_trades=r.winning_trades or 0,
                     losing_trades=r.losing_trades or 0,
                     win_rate=(
-                        (r.winning_trades / r.total_trades * 100)
-                        if r.total_trades
-                        else None
+                        (r.winning_trades / r.total_trades * 100) if r.total_trades else None
                     ),
                     total_pnl=float(r.total_pnl or 0),
                     avg_pnl=(
@@ -159,19 +153,15 @@ async def get_symbol_performance(
                 select(
                     Trade.symbol,
                     func.count(Trade.id).label("total_trades"),
-                    func.sum(
-                        func.case((Trade.pnl > 0, 1), else_=0)
-                    ).label("winning_trades"),
-                    func.sum(
-                        func.case((Trade.pnl < 0, 1), else_=0)
-                    ).label("losing_trades"),
+                    func.sum(func.case((Trade.pnl > 0, 1), else_=0)).label("winning_trades"),
+                    func.sum(func.case((Trade.pnl < 0, 1), else_=0)).label("losing_trades"),
                     func.sum(Trade.pnl).label("total_pnl"),
-                    func.max(
-                        func.case((Trade.pnl > 0, Trade.pnl), else_=None)
-                    ).label("largest_win"),
-                    func.min(
-                        func.case((Trade.pnl < 0, Trade.pnl), else_=None)
-                    ).label("largest_loss"),
+                    func.max(func.case((Trade.pnl > 0, Trade.pnl), else_=None)).label(
+                        "largest_win"
+                    ),
+                    func.min(func.case((Trade.pnl < 0, Trade.pnl), else_=None)).label(
+                        "largest_loss"
+                    ),
                 )
                 .where(
                     and_(
@@ -191,9 +181,7 @@ async def get_symbol_performance(
                     winning_trades=r.winning_trades or 0,
                     losing_trades=r.losing_trades or 0,
                     win_rate=(
-                        (r.winning_trades / r.total_trades * 100)
-                        if r.total_trades
-                        else None
+                        (r.winning_trades / r.total_trades * 100) if r.total_trades else None
                     ),
                     total_pnl=float(r.total_pnl or 0),
                     avg_pnl=(
@@ -228,24 +216,17 @@ async def get_strategy_comparison(
                 trade_stats = session.execute(
                     select(
                         func.count(Trade.id).label("total_trades"),
-                        func.sum(
-                            func.case((Trade.pnl > 0, 1), else_=0)
-                        ).label("winning_trades"),
-                        func.sum(
-                            func.case((Trade.pnl < 0, 1), else_=0)
-                        ).label("losing_trades"),
+                        func.sum(func.case((Trade.pnl > 0, 1), else_=0)).label("winning_trades"),
+                        func.sum(func.case((Trade.pnl < 0, 1), else_=0)).label("losing_trades"),
                         func.sum(Trade.pnl).label("total_pnl"),
-                        func.sum(
-                            func.case((Trade.pnl > 0, Trade.pnl), else_=0)
-                        ).label("gross_profit"),
-                        func.sum(
-                            func.case(
-                                (Trade.pnl < 0, func.abs(Trade.pnl)), else_=0
-                            )
-                        ).label("gross_loss"),
+                        func.sum(func.case((Trade.pnl > 0, Trade.pnl), else_=0)).label(
+                            "gross_profit"
+                        ),
+                        func.sum(func.case((Trade.pnl < 0, func.abs(Trade.pnl)), else_=0)).label(
+                            "gross_loss"
+                        ),
                         func.avg(Trade.holding_time_seconds).label("avg_holding_time"),
-                    )
-                    .where(
+                    ).where(
                         and_(
                             Trade.strategy_id == strategy.id,
                             Trade.entry_time >= since,
@@ -260,15 +241,16 @@ async def get_strategy_comparison(
                 # Calculate profit factor
                 profit_factor = None
                 if trade_stats.gross_loss and trade_stats.gross_loss > 0:
-                    profit_factor = float(
-                        trade_stats.gross_profit / trade_stats.gross_loss
-                    ) if trade_stats.gross_profit else 0
+                    profit_factor = (
+                        float(trade_stats.gross_profit / trade_stats.gross_loss)
+                        if trade_stats.gross_profit
+                        else 0
+                    )
 
                 # Get performance metrics from strategy_performance table
                 perf_records = list(
                     session.execute(
-                        select(StrategyPerformance)
-                        .where(
+                        select(StrategyPerformance).where(
                             and_(
                                 StrategyPerformance.strategy_id == strategy.id,
                                 StrategyPerformance.date >= since,
@@ -279,16 +261,8 @@ async def get_strategy_comparison(
                     .all()
                 )
 
-                sharpe_ratios = [
-                    float(p.sharpe_ratio)
-                    for p in perf_records
-                    if p.sharpe_ratio
-                ]
-                max_drawdowns = [
-                    float(p.max_drawdown)
-                    for p in perf_records
-                    if p.max_drawdown
-                ]
+                sharpe_ratios = [float(p.sharpe_ratio) for p in perf_records if p.sharpe_ratio]
+                max_drawdowns = [float(p.max_drawdown) for p in perf_records if p.max_drawdown]
 
                 results.append(
                     StrategyComparison(
@@ -306,9 +280,7 @@ async def get_strategy_comparison(
                         total_pnl=float(trade_stats.total_pnl or 0),
                         profit_factor=profit_factor,
                         sharpe_ratio=(
-                            sum(sharpe_ratios) / len(sharpe_ratios)
-                            if sharpe_ratios
-                            else None
+                            sum(sharpe_ratios) / len(sharpe_ratios) if sharpe_ratios else None
                         ),
                         max_drawdown=min(max_drawdowns) if max_drawdowns else None,
                         avg_holding_time_seconds=(
@@ -347,8 +319,7 @@ async def get_risk_metrics(
             # Get all closed trades
             trades = list(
                 session.execute(
-                    select(Trade)
-                    .where(
+                    select(Trade).where(
                         and_(
                             Trade.entry_time >= since,
                             Trade.status == TradeStatus.CLOSED,
@@ -409,11 +380,10 @@ async def get_risk_metrics(
 
             # Sharpe ratio from daily summaries
             if summaries:
-                daily_returns = [
-                    float(s.total_pnl_pct) for s in summaries if s.total_pnl_pct
-                ]
+                daily_returns = [float(s.total_pnl_pct) for s in summaries if s.total_pnl_pct]
                 if daily_returns:
                     import statistics
+
                     mean_return = statistics.mean(daily_returns)
                     if len(daily_returns) > 1:
                         std_dev = statistics.stdev(daily_returns)
@@ -424,9 +394,7 @@ async def get_risk_metrics(
                     sharpe = None
 
                 # Max drawdown
-                max_drawdowns = [
-                    float(s.max_drawdown) for s in summaries if s.max_drawdown
-                ]
+                max_drawdowns = [float(s.max_drawdown) for s in summaries if s.max_drawdown]
                 max_dd = min(max_drawdowns) if max_drawdowns else None
             else:
                 sharpe = None
@@ -509,8 +477,7 @@ async def get_trade_distribution(
 
             trades = list(
                 session.execute(
-                    select(Trade)
-                    .where(
+                    select(Trade).where(
                         and_(
                             Trade.entry_time >= since,
                             Trade.status == TradeStatus.CLOSED,
@@ -533,8 +500,14 @@ async def get_trade_distribution(
             pnl_values = [float(t.pnl) for t in trades if t.pnl]
             pnl_ranges = [
                 {"range": "< -$500", "count": len([p for p in pnl_values if p < -500])},
-                {"range": "-$500 to -$100", "count": len([p for p in pnl_values if -500 <= p < -100])},
-                {"range": "-$100 to -$50", "count": len([p for p in pnl_values if -100 <= p < -50])},
+                {
+                    "range": "-$500 to -$100",
+                    "count": len([p for p in pnl_values if -500 <= p < -100]),
+                },
+                {
+                    "range": "-$100 to -$50",
+                    "count": len([p for p in pnl_values if -100 <= p < -50]),
+                },
                 {"range": "-$50 to $0", "count": len([p for p in pnl_values if -50 <= p < 0])},
                 {"range": "$0 to $50", "count": len([p for p in pnl_values if 0 <= p < 50])},
                 {"range": "$50 to $100", "count": len([p for p in pnl_values if 50 <= p < 100])},
@@ -548,8 +521,14 @@ async def get_trade_distribution(
                 {"range": "< 5 min", "count": len([h for h in holding_times if h < 300])},
                 {"range": "5-15 min", "count": len([h for h in holding_times if 300 <= h < 900])},
                 {"range": "15-30 min", "count": len([h for h in holding_times if 900 <= h < 1800])},
-                {"range": "30-60 min", "count": len([h for h in holding_times if 1800 <= h < 3600])},
-                {"range": "1-2 hours", "count": len([h for h in holding_times if 3600 <= h < 7200])},
+                {
+                    "range": "30-60 min",
+                    "count": len([h for h in holding_times if 1800 <= h < 3600]),
+                },
+                {
+                    "range": "1-2 hours",
+                    "count": len([h for h in holding_times if 3600 <= h < 7200]),
+                },
                 {"range": "> 2 hours", "count": len([h for h in holding_times if h >= 7200])},
             ]
 

@@ -305,8 +305,7 @@ class DataStreamer:
 
                 # Calculate backoff delay with exponential increase
                 delay = min(
-                    INITIAL_RECONNECT_DELAY * (2 ** self._reconnect_attempts),
-                    MAX_RECONNECT_DELAY
+                    INITIAL_RECONNECT_DELAY * (2**self._reconnect_attempts), MAX_RECONNECT_DELAY
                 )
                 self._reconnect_attempts += 1
 
@@ -369,8 +368,7 @@ class DataStreamer:
                     raise
 
                 delay = min(
-                    INITIAL_RECONNECT_DELAY * (2 ** self._reconnect_attempts),
-                    MAX_RECONNECT_DELAY
+                    INITIAL_RECONNECT_DELAY * (2**self._reconnect_attempts), MAX_RECONNECT_DELAY
                 )
                 self._reconnect_attempts += 1
 

@@ -56,7 +56,9 @@ async def get_data_reception_stats() -> dict[str, Any]:
 async def get_evaluations(
     strategy_name: str | None = Query(None, description="Filter by strategy name"),
     symbol: str | None = Query(None, description="Filter by symbol"),
-    decision: str | None = Query(None, description="Filter by decision (accepted, rejected, skipped)"),
+    decision: str | None = Query(
+        None, description="Filter by decision (accepted, rejected, skipped)"
+    ),
     minutes: int = Query(60, description="Time window in minutes"),
     limit: int = Query(100, description="Maximum number of results"),
 ) -> list[dict[str, Any]]:

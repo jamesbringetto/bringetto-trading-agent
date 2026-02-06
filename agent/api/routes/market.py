@@ -93,7 +93,8 @@ async def get_market_status() -> MarketStatusResponse:
             next_close=next_close,
             timestamp=datetime.now().isoformat(),
             can_trade_regular=session == TradingSession.REGULAR,
-            can_trade_extended=session in (
+            can_trade_extended=session
+            in (
                 TradingSession.PRE_MARKET,
                 TradingSession.REGULAR,
                 TradingSession.AFTER_HOURS,
