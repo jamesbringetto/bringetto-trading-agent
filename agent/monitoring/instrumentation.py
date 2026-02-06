@@ -415,6 +415,26 @@ class Instrumentation:
 
         return evaluation
 
+    def record_rejection_batch(
+        self,
+        strategy_name: str,
+        count: int,
+    ) -> None:
+        """
+        Record a batch of rejected evaluations (counter-only, no individual records).
+
+        Use this for high-volume "no signal" rejections to avoid flooding the
+        evaluations list with thousands of entries per loop cycle.
+
+        Args:
+            strategy_name: Name of the strategy
+            count: Number of rejected evaluations
+        """
+        self._total_evaluations += count
+        self._total_rejected += count
+        self._by_strategy_cumulative[strategy_name]["total"] += count
+        self._by_strategy_cumulative[strategy_name]["rejected"] += count
+
     def record_pipeline_event(
         self,
         stage: str,
@@ -775,14 +795,18 @@ class Instrumentation:
             "trades_received": db_totals["trades_received"] + unsaved["trades_received"],
         }
 
-        # Merge funnel
-        funnel = dict(db_totals.get("funnel", {}))
+        # Merge funnel (start with all default keys at 0)
+        funnel = _default_funnel()
+        for key, val in db_totals.get("funnel", {}).items():
+            funnel[key] = funnel.get(key, 0) + val
         for key, val in unsaved.get("funnel", {}).items():
             funnel[key] = funnel.get(key, 0) + val
         result["funnel"] = funnel
 
-        # Merge risk breakdown
-        risk = dict(db_totals.get("risk_rejection_breakdown", {}))
+        # Merge risk breakdown (start with all default keys at 0)
+        risk = _default_risk_breakdown()
+        for key, val in db_totals.get("risk_rejection_breakdown", {}).items():
+            risk[key] = risk.get(key, 0) + val
         for key, val in unsaved.get("risk_rejection_breakdown", {}).items():
             risk[key] = risk.get(key, 0) + val
         result["risk_rejection_breakdown"] = risk

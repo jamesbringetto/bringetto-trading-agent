@@ -369,41 +369,41 @@ function EvaluationSummaryCard({ summary, timeRange }: { summary: EvaluationSumm
                       <div className="text-xs text-muted-foreground mb-3">Pipeline Progress</div>
                       <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-sm">
                         <div className="text-center p-2 rounded bg-green-100">
-                          <p className="text-green-800 font-medium">{funnel.signal_generated}</p>
+                          <p className="text-green-800 font-medium">{funnel.signal_generated || 0}</p>
                           <p className="text-green-700 text-xs">Signals</p>
                         </div>
                         <div className="flex items-center justify-center text-muted-foreground">
                           <ArrowRight className="h-4 w-4" />
                         </div>
                         <div className="text-center p-2 rounded bg-teal-100">
-                          <p className="text-teal-800 font-medium">{funnel.orders_submitted}</p>
+                          <p className="text-teal-800 font-medium">{funnel.orders_submitted || 0}</p>
                           <p className="text-teal-700 text-xs">Submitted</p>
                         </div>
                         <div className="flex items-center justify-center text-muted-foreground">
                           <ArrowRight className="h-4 w-4" />
                         </div>
                         <div className="text-center p-2 rounded bg-cyan-100">
-                          <p className="text-cyan-800 font-medium">{funnel.orders_filled}</p>
+                          <p className="text-cyan-800 font-medium">{funnel.orders_filled || 0}</p>
                           <p className="text-cyan-700 text-xs">Filled</p>
                         </div>
                       </div>
 
                       {/* Blocked breakdown */}
-                      {(funnel.blocked_pdt > 0 || funnel.blocked_risk_validation > 0 || funnel.blocked_position_size > 0) && (
+                      {((funnel.blocked_pdt || 0) > 0 || (funnel.blocked_risk_validation || 0) > 0 || (funnel.blocked_position_size || 0) > 0) && (
                         <div className="mt-3 pt-3 border-t border-muted">
                           <div className="text-xs text-muted-foreground mb-2">Blocked Signals</div>
                           <div className="flex flex-wrap gap-2 text-xs">
-                            {funnel.blocked_pdt > 0 && (
+                            {(funnel.blocked_pdt || 0) > 0 && (
                               <span className="px-2 py-1 rounded bg-yellow-100 text-yellow-800">
                                 PDT: {funnel.blocked_pdt}
                               </span>
                             )}
-                            {funnel.blocked_risk_validation > 0 && (
+                            {(funnel.blocked_risk_validation || 0) > 0 && (
                               <span className="px-2 py-1 rounded bg-red-100 text-red-800">
                                 Risk: {funnel.blocked_risk_validation}
                               </span>
                             )}
-                            {funnel.blocked_position_size > 0 && (
+                            {(funnel.blocked_position_size || 0) > 0 && (
                               <span className="px-2 py-1 rounded bg-orange-100 text-orange-800">
                                 Size: {funnel.blocked_position_size}
                               </span>
@@ -429,18 +429,18 @@ function EvaluationSummaryCard({ summary, timeRange }: { summary: EvaluationSumm
                       )}
 
                       {/* Trade outcomes */}
-                      {funnel.trades_closed > 0 && (
+                      {(funnel.trades_closed || 0) > 0 && (
                         <div className="mt-3 pt-3 border-t border-muted">
                           <div className="text-xs text-muted-foreground mb-2">Trade Outcomes</div>
                           <div className="flex gap-4 text-sm">
                             <span className="text-green-600 font-medium">
-                              Won: {funnel.trades_won}
+                              Won: {funnel.trades_won || 0}
                             </span>
                             <span className="text-red-600 font-medium">
-                              Lost: {funnel.trades_lost}
+                              Lost: {funnel.trades_lost || 0}
                             </span>
                             <span className="text-muted-foreground">
-                              Win Rate: {(funnel.trades_won / funnel.trades_closed * 100).toFixed(1)}%
+                              Win Rate: {((funnel.trades_won || 0) / (funnel.trades_closed || 1) * 100).toFixed(1)}%
                             </span>
                           </div>
                         </div>
@@ -578,24 +578,39 @@ interface FunnelCardProps {
 function FunnelCard({ funnel, riskBreakdown, totalEvaluations }: FunnelCardProps) {
   const [showRiskBreakdown, setShowRiskBreakdown] = useState(false);
 
+  // Safely access funnel values with fallback to 0
+  const f = {
+    skipped_no_data: funnel.skipped_no_data || 0,
+    signal_generated: funnel.signal_generated || 0,
+    blocked_pdt: funnel.blocked_pdt || 0,
+    blocked_risk_validation: funnel.blocked_risk_validation || 0,
+    blocked_position_size: funnel.blocked_position_size || 0,
+    orders_submitted: funnel.orders_submitted || 0,
+    orders_failed: funnel.orders_failed || 0,
+    orders_filled: funnel.orders_filled || 0,
+    trades_closed: funnel.trades_closed || 0,
+    trades_won: funnel.trades_won || 0,
+    trades_lost: funnel.trades_lost || 0,
+  };
+
   // Define funnel stages with their values
   const stages = [
     { label: 'Evaluated', value: totalEvaluations, color: 'bg-slate-500' },
-    { label: 'Data Available', value: totalEvaluations - (funnel.skipped_no_data || 0), color: 'bg-blue-500' },
-    { label: 'Signal Generated', value: funnel.signal_generated, color: 'bg-green-500' },
-    { label: 'Risk Validated', value: funnel.signal_generated - funnel.blocked_pdt - funnel.blocked_risk_validation - funnel.blocked_position_size, color: 'bg-emerald-500' },
-    { label: 'Order Submitted', value: funnel.orders_submitted, color: 'bg-teal-500' },
-    { label: 'Order Filled', value: funnel.orders_filled, color: 'bg-cyan-500' },
-    { label: 'Trade Closed', value: funnel.trades_closed, color: 'bg-purple-500' },
+    { label: 'Data Available', value: totalEvaluations - f.skipped_no_data, color: 'bg-blue-500' },
+    { label: 'Signal Generated', value: f.signal_generated, color: 'bg-green-500' },
+    { label: 'Risk Validated', value: f.signal_generated - f.blocked_pdt - f.blocked_risk_validation - f.blocked_position_size, color: 'bg-emerald-500' },
+    { label: 'Order Submitted', value: f.orders_submitted, color: 'bg-teal-500' },
+    { label: 'Order Filled', value: f.orders_filled, color: 'bg-cyan-500' },
+    { label: 'Trade Closed', value: f.trades_closed, color: 'bg-purple-500' },
   ];
 
   // Filter to only show stages with data or their preceding stages
   const maxStageWithValue = stages.reduce((max, stage, idx) => stage.value > 0 ? idx : max, 0);
 
   // Calculate rejection summary
-  const rejectedAtData = funnel.skipped_no_data || 0;
-  const rejectedAtRisk = funnel.blocked_pdt + funnel.blocked_risk_validation + funnel.blocked_position_size;
-  const rejectedAtOrder = funnel.orders_failed;
+  const rejectedAtData = f.skipped_no_data;
+  const rejectedAtRisk = f.blocked_pdt + f.blocked_risk_validation + f.blocked_position_size;
+  const rejectedAtOrder = f.orders_failed;
 
   return (
     <div className="rounded-lg border bg-card p-6">
@@ -635,20 +650,20 @@ function FunnelCard({ funnel, riskBreakdown, totalEvaluations }: FunnelCardProps
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 pt-4 border-t">
         <div className="text-center">
           <p className="text-sm text-muted-foreground">Open Positions</p>
-          <p className="text-xl font-bold">{funnel.orders_filled - funnel.trades_closed}</p>
+          <p className="text-xl font-bold">{f.orders_filled - f.trades_closed}</p>
         </div>
         <div className="text-center">
           <p className="text-sm text-muted-foreground">Trades Won</p>
-          <p className="text-xl font-bold text-green-600">{funnel.trades_won}</p>
+          <p className="text-xl font-bold text-green-600">{f.trades_won}</p>
         </div>
         <div className="text-center">
           <p className="text-sm text-muted-foreground">Trades Lost</p>
-          <p className="text-xl font-bold text-red-600">{funnel.trades_lost}</p>
+          <p className="text-xl font-bold text-red-600">{f.trades_lost}</p>
         </div>
         <div className="text-center">
           <p className="text-sm text-muted-foreground">Win Rate</p>
-          <p className={`text-xl font-bold ${funnel.trades_closed > 0 && funnel.trades_won / funnel.trades_closed >= 0.5 ? 'text-green-600' : 'text-muted-foreground'}`}>
-            {funnel.trades_closed > 0 ? `${(funnel.trades_won / funnel.trades_closed * 100).toFixed(1)}%` : '-'}
+          <p className={`text-xl font-bold ${f.trades_closed > 0 && f.trades_won / f.trades_closed >= 0.5 ? 'text-green-600' : 'text-muted-foreground'}`}>
+            {f.trades_closed > 0 ? `${(f.trades_won / f.trades_closed * 100).toFixed(1)}%` : '-'}
           </p>
         </div>
       </div>
@@ -668,19 +683,19 @@ function FunnelCard({ funnel, riskBreakdown, totalEvaluations }: FunnelCardProps
           <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
             <div className="rounded bg-muted/50 p-2">
               <p className="text-muted-foreground">No Data</p>
-              <p className="font-medium">{(funnel.skipped_no_data || 0).toLocaleString()}</p>
+              <p className="font-medium">{f.skipped_no_data.toLocaleString()}</p>
             </div>
             <div className="rounded bg-muted/50 p-2">
               <p className="text-muted-foreground">PDT Blocked</p>
-              <p className="font-medium">{funnel.blocked_pdt.toLocaleString()}</p>
+              <p className="font-medium">{f.blocked_pdt.toLocaleString()}</p>
             </div>
             <div className="rounded bg-muted/50 p-2">
               <p className="text-muted-foreground">Risk Validation</p>
-              <p className="font-medium">{funnel.blocked_risk_validation.toLocaleString()}</p>
+              <p className="font-medium">{f.blocked_risk_validation.toLocaleString()}</p>
             </div>
             <div className="rounded bg-muted/50 p-2">
               <p className="text-muted-foreground">Position Size</p>
-              <p className="font-medium">{funnel.blocked_position_size.toLocaleString()}</p>
+              <p className="font-medium">{f.blocked_position_size.toLocaleString()}</p>
             </div>
 
             {/* Risk validation sub-breakdown */}
