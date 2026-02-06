@@ -36,7 +36,14 @@ class TestOpeningRangeBreakout:
         strategy = OpeningRangeBreakout()
         assert strategy.name == "Opening Range Breakout"
         assert strategy.is_active is True
+        # allowed_symbols starts empty — populated at runtime by SymbolScanner
+        assert strategy.parameters["allowed_symbols"] == []
+
+    def test_initialization_with_custom_symbols(self):
+        """Test strategy can be initialized with custom symbols."""
+        strategy = OpeningRangeBreakout(parameters={"allowed_symbols": ["SPY", "QQQ"]})
         assert "SPY" in strategy.parameters["allowed_symbols"]
+        assert "QQQ" in strategy.parameters["allowed_symbols"]
 
     def test_update_opening_range(self):
         """Test opening range is tracked correctly."""

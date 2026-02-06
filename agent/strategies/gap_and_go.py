@@ -55,7 +55,7 @@ class GapAndGo(BaseStrategy):
         "take_profit_pct": TradingConstants.GAP_MAX_PROFIT_PCT,
         "position_size_pct": TradingConstants.GAP_POSITION_SIZE_PCT,
         "max_positions": TradingConstants.GAP_MAX_POSITIONS,
-        "allowed_symbols": list(TradingConstants.SP500_ASSETS),
+        "allowed_symbols": [],  # Populated dynamically by SymbolScanner
         "exit_time_hour": TradingConstants.GAP_EXIT_TIME_HOUR,
         "exit_time_minute": TradingConstants.GAP_EXIT_TIME_MINUTE,
         "min_price": 10.0,

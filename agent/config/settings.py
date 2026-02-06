@@ -74,6 +74,38 @@ class Settings(BaseSettings):
     enable_auto_disable: bool = Field(default=True)
     enable_ab_testing: bool = Field(default=True)
 
+    # Dynamic Symbol Scanner
+    enable_symbol_scanner: bool = Field(
+        default=True,
+        description="Enable dynamic symbol scanning instead of hardcoded SP500 list",
+    )
+    scanner_min_price: float = Field(
+        default=5.0,
+        ge=0,
+        description="Minimum stock price for scanner qualification",
+    )
+    scanner_min_avg_volume: int = Field(
+        default=1_000_000,
+        ge=0,
+        description="Minimum average daily volume for scanner qualification",
+    )
+    scanner_lookback_days: int = Field(
+        default=5,
+        ge=1,
+        le=30,
+        description="Number of days to look back for volume/price screening",
+    )
+    scanner_max_symbols: int = Field(
+        default=1000,
+        ge=10,
+        description="Maximum number of symbols to include after scanning",
+    )
+    scanner_rescan_interval_minutes: int = Field(
+        default=60,
+        ge=10,
+        description="Minutes between intraday rescans for gap/momentum candidates",
+    )
+
     # Database
     database_url: PostgresDsn = Field(
         default="postgresql://postgres:postgres@localhost:5432/trading_agent"

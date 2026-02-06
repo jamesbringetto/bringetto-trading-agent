@@ -827,3 +827,9 @@ class TradingConstants:
     EOD_STOP_LOSS_PCT: float = 1.0
     EOD_TAKE_PROFIT_PCT: float = 1.5
     EOD_EXIT_MINUTE: int = 55  # Exit at 3:55 PM
+
+    # Dynamic Symbol Scanner defaults
+    SCANNER_MIN_PRICE: float = 5.0
+    SCANNER_MIN_AVG_VOLUME: int = 1_000_000
+    SCANNER_LOOKBACK_DAYS: int = 5
+    SCANNER_MAX_SYMBOLS: int = 1000
