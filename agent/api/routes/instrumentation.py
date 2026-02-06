@@ -12,17 +12,78 @@ from agent.monitoring.instrumentation import get_instrumentation
 # All endpoints in this router require API key authentication
 router = APIRouter(dependencies=[Depends(require_api_key)])
 
+# Valid time range values and their corresponding timedelta
+TIME_RANGE_MAP: dict[str, timedelta | None] = {
+    "session": None,  # Current session only (in-memory)
+    "1d": timedelta(days=1),
+    "7d": timedelta(days=7),
+    "30d": timedelta(days=30),
+}
+
+
+def _resolve_time_range(time_range: str) -> datetime | None:
+    """Convert a time_range string to a UTC cutoff datetime.
+
+    Returns None for 'session' (use in-memory data only).
+    """
+    td = TIME_RANGE_MAP.get(time_range)
+    if td is None:
+        return None
+    return datetime.utcnow() - td
+
 
 @router.get("/")
-async def get_instrumentation_status() -> dict[str, Any]:
+async def get_instrumentation_status(
+    time_range: str = Query(
+        "session",
+        description="Time range for counters: session, 1d, 7d, 30d",
+        pattern="^(session|1d|7d|30d)$",
+    ),
+) -> dict[str, Any]:
     """
     Get complete instrumentation status.
 
     Returns data reception stats, evaluation summary, and recent accepted signals.
+
+    The `time_range` parameter controls the scope of counters:
+    - `session`: Current agent session only (in-memory, default)
+    - `1d`: Last 24 hours (persisted across redeployments)
+    - `7d`: Last 7 days
+    - `30d`: Last 30 days
     """
     try:
         inst = get_instrumentation()
-        return inst.get_status()
+        since = _resolve_time_range(time_range)
+
+        if since is None:
+            # Session mode: use in-memory data (original behavior)
+            return inst.get_status()
+
+        # Historical mode: query DB + current unsaved delta
+        historical = inst.get_historical_summary(since)
+
+        return {
+            "data_reception": {
+                **inst.get_data_stats(),
+                # Override totals with historical values
+                "total_bars": historical["bars_received"],
+                "total_quotes": historical["quotes_received"],
+                "total_trades": historical["trades_received"],
+            },
+            "evaluations": {
+                "time_window_minutes": int(TIME_RANGE_MAP[time_range].total_seconds() / 60),
+                "total_evaluations": historical["total_evaluations"],
+                "accepted": historical["accepted"],
+                "rejected": historical["rejected"],
+                "skipped": historical["skipped"],
+                "acceptance_rate": historical["acceptance_rate"],
+                "by_strategy": historical["by_strategy"],
+                "by_symbol": {},  # Not tracked in snapshots
+                "funnel": historical["funnel"],
+                "risk_rejection_breakdown": historical["risk_rejection_breakdown"],
+            },
+            "recent_accepted_signals": inst.get_evaluations(decision="accepted", limit=10),
+        }
     except Exception as e:
         logger.error(f"Failed to get instrumentation status: {e}")
         return {
@@ -34,7 +95,13 @@ async def get_instrumentation_status() -> dict[str, Any]:
 
 
 @router.get("/data-reception")
-async def get_data_reception_stats() -> dict[str, Any]:
+async def get_data_reception_stats(
+    time_range: str = Query(
+        "session",
+        description="Time range: session, 1d, 7d, 30d",
+        pattern="^(session|1d|7d|30d)$",
+    ),
+) -> dict[str, Any]:
     """
     Get market data reception statistics.
 
@@ -46,7 +113,16 @@ async def get_data_reception_stats() -> dict[str, Any]:
     """
     try:
         inst = get_instrumentation()
-        return inst.get_data_stats()
+        stats = inst.get_data_stats()
+        since = _resolve_time_range(time_range)
+
+        if since is not None:
+            historical = inst.get_historical_summary(since)
+            stats["total_bars"] = historical["bars_received"]
+            stats["total_quotes"] = historical["quotes_received"]
+            stats["total_trades"] = historical["trades_received"]
+
+        return stats
     except Exception as e:
         logger.error(f"Failed to get data reception stats: {e}")
         return {"error": str(e)}
@@ -89,6 +165,11 @@ async def get_evaluations(
 @router.get("/evaluations/summary")
 async def get_evaluation_summary(
     minutes: int = Query(60, description="Time window in minutes"),
+    time_range: str = Query(
+        "session",
+        description="Time range: session, 1d, 7d, 30d",
+        pattern="^(session|1d|7d|30d)$",
+    ),
 ) -> dict[str, Any]:
     """
     Get evaluation summary statistics.
@@ -102,6 +183,14 @@ async def get_evaluation_summary(
     """
     try:
         inst = get_instrumentation()
+        since = _resolve_time_range(time_range)
+
+        if since is not None:
+            historical = inst.get_historical_summary(since)
+            historical["time_window_minutes"] = int(TIME_RANGE_MAP[time_range].total_seconds() / 60)
+            historical["by_symbol"] = {}
+            return historical
+
         return inst.get_evaluation_summary(minutes=minutes)
     except Exception as e:
         logger.error(f"Failed to get evaluation summary: {e}")

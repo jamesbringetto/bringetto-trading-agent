@@ -4,6 +4,9 @@ Provides visibility into:
 1. Market data reception - heartbeats showing data is flowing
 2. Strategy evaluations - every decision (accepted AND rejected)
 3. System health metrics
+
+Counter data is periodically persisted to PostgreSQL so that metrics
+survive agent redeployments and support historical time-range queries.
 """
 
 import asyncio
@@ -100,6 +103,54 @@ class StrategyEvaluation:
         }
 
 
+def _default_funnel() -> dict[str, int]:
+    """Return the default funnel counter structure."""
+    return {
+        "skipped_no_data": 0,
+        "signal_generated": 0,
+        "blocked_pdt": 0,
+        "blocked_risk_validation": 0,
+        "blocked_position_size": 0,
+        "orders_submitted": 0,
+        "orders_failed": 0,
+        "orders_filled": 0,
+        "trades_closed": 0,
+        "trades_won": 0,
+        "trades_lost": 0,
+    }
+
+
+def _default_risk_breakdown() -> dict[str, int]:
+    """Return the default risk rejection breakdown structure."""
+    return {
+        "market_hours": 0,
+        "no_stop_loss": 0,
+        "invalid_stop_loss": 0,
+        "position_size": 0,
+        "buying_power": 0,
+        "daytrading_buying_power": 0,
+        "max_positions": 0,
+        "max_exposure": 0,
+        "min_price": 0,
+    }
+
+
+def _default_strategy_funnel() -> dict[str, int]:
+    """Return the default per-strategy funnel counter structure."""
+    return {
+        "signal_generated": 0,
+        "blocked_pdt": 0,
+        "blocked_risk_validation": 0,
+        "blocked_position_size": 0,
+        "orders_submitted": 0,
+        "orders_failed": 0,
+        "orders_filled": 0,
+        "trades_closed": 0,
+        "trades_won": 0,
+        "trades_lost": 0,
+    }
+
+
 class Instrumentation:
     """
     Centralized instrumentation for trading agent observability.
@@ -108,6 +159,7 @@ class Instrumentation:
     - Market data heartbeat logging (periodic confirmation data is flowing)
     - Strategy evaluation tracking (all decisions logged)
     - In-memory stats with periodic summaries
+    - Periodic persistence to PostgreSQL for surviving redeployments
     """
 
     def __init__(
@@ -132,53 +184,36 @@ class Instrumentation:
         )
 
         # Funnel counters (aggregate)
-        self._funnel: dict[str, int] = {
-            "skipped_no_data": 0,
-            "signal_generated": 0,  # Same as _total_accepted
-            "blocked_pdt": 0,
-            "blocked_risk_validation": 0,
-            "blocked_position_size": 0,
-            "orders_submitted": 0,
-            "orders_failed": 0,
-            "orders_filled": 0,
-            "trades_closed": 0,
-            "trades_won": 0,
-            "trades_lost": 0,
-        }
+        self._funnel: dict[str, int] = _default_funnel()
 
         # Risk rejection breakdown (aggregate)
-        self._risk_rejection_breakdown: dict[str, int] = {
-            "market_hours": 0,
-            "no_stop_loss": 0,
-            "invalid_stop_loss": 0,
-            "position_size": 0,
-            "buying_power": 0,
-            "daytrading_buying_power": 0,  # DTMC prevention
-            "max_positions": 0,
-            "max_exposure": 0,
-            "min_price": 0,
-        }
+        self._risk_rejection_breakdown: dict[str, int] = _default_risk_breakdown()
 
         # Per-strategy funnel counters
         self._by_strategy_funnel: dict[str, dict[str, int]] = defaultdict(
-            lambda: {
-                "signal_generated": 0,
-                "blocked_pdt": 0,
-                "blocked_risk_validation": 0,
-                "blocked_position_size": 0,
-                "orders_submitted": 0,
-                "orders_failed": 0,
-                "orders_filled": 0,
-                "trades_closed": 0,
-                "trades_won": 0,
-                "trades_lost": 0,
-            }
+            lambda: _default_strategy_funnel()
         )
 
         # Per-strategy risk rejection breakdown
         self._by_strategy_risk_breakdown: dict[str, dict[str, int]] = defaultdict(
             lambda: defaultdict(int)
         )
+
+        # ---- Snapshot persistence tracking ----
+        # Track what was last persisted so we can compute deltas
+        self._last_snapshot_time: datetime = datetime.utcnow()
+        self._last_snapshot_bars: int = 0
+        self._last_snapshot_quotes: int = 0
+        self._last_snapshot_trades: int = 0
+        self._last_snapshot_evaluations: int = 0
+        self._last_snapshot_accepted: int = 0
+        self._last_snapshot_rejected: int = 0
+        self._last_snapshot_skipped: int = 0
+        self._last_snapshot_funnel: dict[str, int] = _default_funnel()
+        self._last_snapshot_risk_breakdown: dict[str, int] = _default_risk_breakdown()
+        self._last_snapshot_by_strategy_cumulative: dict[str, dict[str, int]] = {}
+        self._last_snapshot_by_strategy_funnel: dict[str, dict[str, int]] = {}
+        self._last_snapshot_by_strategy_risk: dict[str, dict[str, int]] = {}
 
         logger.info(
             f"Instrumentation initialized - "
@@ -274,6 +309,8 @@ class Instrumentation:
             while True:
                 await asyncio.sleep(self._heartbeat_interval)
                 self.log_heartbeat()
+                # Persist snapshot to DB on each heartbeat
+                self.save_snapshot()
 
         self._heartbeat_task = asyncio.create_task(heartbeat_loop())
 
@@ -283,6 +320,8 @@ class Instrumentation:
             self._heartbeat_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await self._heartbeat_task
+            # Persist final snapshot before stopping
+            self.save_snapshot()
             logger.info("Heartbeat stopped")
 
     # -------------------------------------------------------------------------
@@ -409,18 +448,7 @@ class Instrumentation:
         if strategy_name and stage != "skipped_no_data":
             # Ensure the strategy entry exists with all keys
             if strategy_name not in self._by_strategy_funnel:
-                self._by_strategy_funnel[strategy_name] = {
-                    "signal_generated": 0,
-                    "blocked_pdt": 0,
-                    "blocked_risk_validation": 0,
-                    "blocked_position_size": 0,
-                    "orders_submitted": 0,
-                    "orders_failed": 0,
-                    "orders_filled": 0,
-                    "trades_closed": 0,
-                    "trades_won": 0,
-                    "trades_lost": 0,
-                }
+                self._by_strategy_funnel[strategy_name] = _default_strategy_funnel()
             if stage in self._by_strategy_funnel[strategy_name]:
                 self._by_strategy_funnel[strategy_name][stage] += 1
 
@@ -526,6 +554,265 @@ class Instrumentation:
             "funnel": dict(self._funnel),
             "risk_rejection_breakdown": dict(self._risk_rejection_breakdown),
         }
+
+    # -------------------------------------------------------------------------
+    # Snapshot Persistence
+    # -------------------------------------------------------------------------
+
+    def _compute_snapshot_delta(self) -> dict[str, Any]:
+        """Compute the delta between current counters and last persisted snapshot."""
+        now = datetime.utcnow()
+
+        # Data reception deltas
+        bars_delta = self._data_stats.total_bars - self._last_snapshot_bars
+        quotes_delta = self._data_stats.total_quotes - self._last_snapshot_quotes
+        trades_delta = self._data_stats.total_trades - self._last_snapshot_trades
+
+        # Evaluation count deltas
+        evals_delta = self._total_evaluations - self._last_snapshot_evaluations
+        accepted_delta = self._total_accepted - self._last_snapshot_accepted
+        rejected_delta = self._total_rejected - self._last_snapshot_rejected
+        skipped_delta = self._total_skipped - self._last_snapshot_skipped
+
+        # Funnel deltas
+        funnel_delta = {}
+        for key in self._funnel:
+            delta = self._funnel[key] - self._last_snapshot_funnel.get(key, 0)
+            if delta != 0:
+                funnel_delta[key] = delta
+
+        # Risk breakdown deltas
+        risk_delta = {}
+        for key in self._risk_rejection_breakdown:
+            delta = self._risk_rejection_breakdown[key] - self._last_snapshot_risk_breakdown.get(
+                key, 0
+            )
+            if delta != 0:
+                risk_delta[key] = delta
+
+        # Per-strategy deltas
+        by_strategy_delta: dict[str, dict[str, Any]] = {}
+        for strategy_name in set(
+            list(self._by_strategy_cumulative.keys())
+            + list(self._by_strategy_funnel.keys())
+            + list(self._by_strategy_risk_breakdown.keys())
+        ):
+            strategy_delta: dict[str, Any] = {}
+
+            # Cumulative eval counts
+            if strategy_name in self._by_strategy_cumulative:
+                for key, val in self._by_strategy_cumulative[strategy_name].items():
+                    prev = self._last_snapshot_by_strategy_cumulative.get(strategy_name, {}).get(
+                        key, 0
+                    )
+                    d = val - prev
+                    if d != 0:
+                        strategy_delta[key] = d
+
+            # Funnel
+            if strategy_name in self._by_strategy_funnel:
+                funnel_d: dict[str, int] = {}
+                for key, val in self._by_strategy_funnel[strategy_name].items():
+                    prev = self._last_snapshot_by_strategy_funnel.get(strategy_name, {}).get(key, 0)
+                    d = val - prev
+                    if d != 0:
+                        funnel_d[key] = d
+                if funnel_d:
+                    strategy_delta["funnel"] = funnel_d
+
+            # Risk breakdown
+            if strategy_name in self._by_strategy_risk_breakdown:
+                risk_d: dict[str, int] = {}
+                for key, val in self._by_strategy_risk_breakdown[strategy_name].items():
+                    prev = self._last_snapshot_by_strategy_risk.get(strategy_name, {}).get(key, 0)
+                    d = val - prev
+                    if d != 0:
+                        risk_d[key] = d
+                if risk_d:
+                    strategy_delta["risk_rejection_breakdown"] = risk_d
+
+            if strategy_delta:
+                by_strategy_delta[strategy_name] = strategy_delta
+
+        return {
+            "period_start": self._last_snapshot_time,
+            "period_end": now,
+            "bars_received": bars_delta,
+            "quotes_received": quotes_delta,
+            "trades_received": trades_delta,
+            "total_evaluations": evals_delta,
+            "accepted": accepted_delta,
+            "rejected": rejected_delta,
+            "skipped": skipped_delta,
+            "funnel": funnel_delta,
+            "risk_rejection_breakdown": risk_delta,
+            "by_strategy": by_strategy_delta,
+        }
+
+    def _update_last_snapshot_markers(self) -> None:
+        """Update the 'last persisted' markers to current counter values."""
+        self._last_snapshot_time = datetime.utcnow()
+        self._last_snapshot_bars = self._data_stats.total_bars
+        self._last_snapshot_quotes = self._data_stats.total_quotes
+        self._last_snapshot_trades = self._data_stats.total_trades
+        self._last_snapshot_evaluations = self._total_evaluations
+        self._last_snapshot_accepted = self._total_accepted
+        self._last_snapshot_rejected = self._total_rejected
+        self._last_snapshot_skipped = self._total_skipped
+        self._last_snapshot_funnel = dict(self._funnel)
+        self._last_snapshot_risk_breakdown = dict(self._risk_rejection_breakdown)
+
+        # Deep copy per-strategy data
+        self._last_snapshot_by_strategy_cumulative = {
+            k: dict(v) for k, v in self._by_strategy_cumulative.items()
+        }
+        self._last_snapshot_by_strategy_funnel = {
+            k: dict(v) for k, v in self._by_strategy_funnel.items()
+        }
+        self._last_snapshot_by_strategy_risk = {
+            k: dict(v) for k, v in self._by_strategy_risk_breakdown.items()
+        }
+
+    def save_snapshot(self) -> bool:
+        """Persist a delta snapshot of current counters to the database.
+
+        Computes the difference between current counter values and the
+        values at the time of the last snapshot, then writes that delta
+        to the instrumentation_snapshots table.
+
+        Returns True if snapshot was saved, False on error.
+        """
+        try:
+            from agent.database import get_session
+            from agent.database.repositories import InstrumentationSnapshotRepository
+
+            delta = self._compute_snapshot_delta()
+
+            # Skip if there's nothing to persist
+            has_data = (
+                delta["bars_received"] > 0
+                or delta["quotes_received"] > 0
+                or delta["trades_received"] > 0
+                or delta["total_evaluations"] > 0
+                or delta["funnel"]
+                or delta["risk_rejection_breakdown"]
+                or delta["by_strategy"]
+            )
+            if not has_data:
+                return True
+
+            with get_session() as session:
+                repo = InstrumentationSnapshotRepository(session)
+                repo.create(
+                    period_start=delta["period_start"],
+                    period_end=delta["period_end"],
+                    bars_received=delta["bars_received"],
+                    quotes_received=delta["quotes_received"],
+                    trades_received=delta["trades_received"],
+                    total_evaluations=delta["total_evaluations"],
+                    accepted=delta["accepted"],
+                    rejected=delta["rejected"],
+                    skipped=delta["skipped"],
+                    funnel=delta["funnel"],
+                    risk_rejection_breakdown=delta["risk_rejection_breakdown"],
+                    by_strategy=delta["by_strategy"],
+                )
+
+            self._update_last_snapshot_markers()
+            logger.debug(
+                f"[SNAPSHOT] Persisted instrumentation delta - "
+                f"evals={delta['total_evaluations']}, "
+                f"bars={delta['bars_received']}, "
+                f"quotes={delta['quotes_received']}"
+            )
+            return True
+        except Exception as e:
+            logger.error(f"Failed to persist instrumentation snapshot: {e}")
+            return False
+
+    def get_historical_summary(self, since: datetime) -> dict[str, Any]:
+        """Query DB for aggregated counters since the given time,
+        plus any unsaved delta from the current session.
+
+        Args:
+            since: Start of the time window
+
+        Returns:
+            Combined summary dict with DB history + current unsaved delta
+        """
+        try:
+            from agent.database import get_session
+            from agent.database.repositories import InstrumentationSnapshotRepository
+
+            with get_session() as session:
+                repo = InstrumentationSnapshotRepository(session)
+                db_totals = repo.get_aggregated_since(since)
+        except Exception as e:
+            logger.error(f"Failed to query historical snapshots: {e}")
+            db_totals = {
+                "bars_received": 0,
+                "quotes_received": 0,
+                "trades_received": 0,
+                "total_evaluations": 0,
+                "accepted": 0,
+                "rejected": 0,
+                "skipped": 0,
+                "funnel": {},
+                "risk_rejection_breakdown": {},
+                "by_strategy": {},
+            }
+
+        # Add current unsaved delta (changes since last snapshot)
+        unsaved = self._compute_snapshot_delta()
+
+        result = {
+            "total_evaluations": db_totals["total_evaluations"] + unsaved["total_evaluations"],
+            "accepted": db_totals["accepted"] + unsaved["accepted"],
+            "rejected": db_totals["rejected"] + unsaved["rejected"],
+            "skipped": db_totals["skipped"] + unsaved["skipped"],
+            "bars_received": db_totals["bars_received"] + unsaved["bars_received"],
+            "quotes_received": db_totals["quotes_received"] + unsaved["quotes_received"],
+            "trades_received": db_totals["trades_received"] + unsaved["trades_received"],
+        }
+
+        # Merge funnel
+        funnel = dict(db_totals.get("funnel", {}))
+        for key, val in unsaved.get("funnel", {}).items():
+            funnel[key] = funnel.get(key, 0) + val
+        result["funnel"] = funnel
+
+        # Merge risk breakdown
+        risk = dict(db_totals.get("risk_rejection_breakdown", {}))
+        for key, val in unsaved.get("risk_rejection_breakdown", {}).items():
+            risk[key] = risk.get(key, 0) + val
+        result["risk_rejection_breakdown"] = risk
+
+        # Merge by_strategy
+        by_strategy: dict[str, dict[str, Any]] = {}
+        for src in [db_totals.get("by_strategy", {}), unsaved.get("by_strategy", {})]:
+            for strategy_name, strategy_data in src.items():
+                if strategy_name not in by_strategy:
+                    by_strategy[strategy_name] = {}
+                for key, val in strategy_data.items():
+                    if isinstance(val, dict):
+                        if key not in by_strategy[strategy_name]:
+                            by_strategy[strategy_name][key] = {}
+                        for k2, v2 in val.items():
+                            by_strategy[strategy_name][key][k2] = (
+                                by_strategy[strategy_name][key].get(k2, 0) + v2
+                            )
+                    else:
+                        by_strategy[strategy_name][key] = (
+                            by_strategy[strategy_name].get(key, 0) + val
+                        )
+        result["by_strategy"] = by_strategy
+
+        # Acceptance rate from the combined totals
+        total = result["total_evaluations"]
+        accepted = result["accepted"]
+        result["acceptance_rate"] = round(accepted / total, 4) if total > 0 else 0
+
+        return result
 
     # -------------------------------------------------------------------------
     # Full Status

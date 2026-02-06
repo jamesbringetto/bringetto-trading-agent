@@ -12,6 +12,7 @@ from agent.config.constants import DecisionType, OrderSide, StrategyType, TradeS
 from agent.database.models import (
     Alert,
     DailySummary,
+    InstrumentationSnapshot,
     MarketRegimeRecord,
     Strategy,
     StrategyPerformance,
@@ -596,3 +597,124 @@ class SystemHealthRepository:
         self.session.add(record)
         self.session.flush()
         return record
+
+
+class InstrumentationSnapshotRepository:
+    """Repository for InstrumentationSnapshot operations."""
+
+    def __init__(self, session: Session):
+        self.session = session
+
+    def create(
+        self,
+        period_start: datetime,
+        period_end: datetime,
+        bars_received: int = 0,
+        quotes_received: int = 0,
+        trades_received: int = 0,
+        total_evaluations: int = 0,
+        accepted: int = 0,
+        rejected: int = 0,
+        skipped: int = 0,
+        funnel: dict | None = None,
+        risk_rejection_breakdown: dict | None = None,
+        by_strategy: dict | None = None,
+    ) -> InstrumentationSnapshot:
+        """Create a new instrumentation snapshot."""
+        record = InstrumentationSnapshot(
+            period_start=period_start,
+            period_end=period_end,
+            bars_received=bars_received,
+            quotes_received=quotes_received,
+            trades_received=trades_received,
+            total_evaluations=total_evaluations,
+            accepted=accepted,
+            rejected=rejected,
+            skipped=skipped,
+            funnel=funnel or {},
+            risk_rejection_breakdown=risk_rejection_breakdown or {},
+            by_strategy=by_strategy or {},
+        )
+        self.session.add(record)
+        self.session.flush()
+        return record
+
+    def get_aggregated_since(self, since: datetime) -> dict[str, Any]:
+        """Get summed counter deltas since the given time.
+
+        Returns a dict with the same structure as the snapshot fields,
+        with all integer fields summed and JSONB fields merged additively.
+        """
+        rows = list(
+            self.session.execute(
+                select(InstrumentationSnapshot)
+                .where(InstrumentationSnapshot.period_end >= since)
+                .order_by(InstrumentationSnapshot.timestamp)
+            )
+            .scalars()
+            .all()
+        )
+
+        result: dict[str, Any] = {
+            "bars_received": 0,
+            "quotes_received": 0,
+            "trades_received": 0,
+            "total_evaluations": 0,
+            "accepted": 0,
+            "rejected": 0,
+            "skipped": 0,
+            "funnel": {},
+            "risk_rejection_breakdown": {},
+            "by_strategy": {},
+        }
+
+        for row in rows:
+            result["bars_received"] += row.bars_received
+            result["quotes_received"] += row.quotes_received
+            result["trades_received"] += row.trades_received
+            result["total_evaluations"] += row.total_evaluations
+            result["accepted"] += row.accepted
+            result["rejected"] += row.rejected
+            result["skipped"] += row.skipped
+
+            # Merge funnel JSONB additively
+            for key, val in (row.funnel or {}).items():
+                result["funnel"][key] = result["funnel"].get(key, 0) + val
+
+            # Merge risk breakdown additively
+            for key, val in (row.risk_rejection_breakdown or {}).items():
+                result["risk_rejection_breakdown"][key] = (
+                    result["risk_rejection_breakdown"].get(key, 0) + val
+                )
+
+            # Merge by_strategy additively
+            for strategy_name, strategy_data in (row.by_strategy or {}).items():
+                if strategy_name not in result["by_strategy"]:
+                    result["by_strategy"][strategy_name] = {}
+                for key, val in strategy_data.items():
+                    if isinstance(val, dict):
+                        # Nested dict (funnel, risk_rejection_breakdown)
+                        if key not in result["by_strategy"][strategy_name]:
+                            result["by_strategy"][strategy_name][key] = {}
+                        for k2, v2 in val.items():
+                            result["by_strategy"][strategy_name][key][k2] = (
+                                result["by_strategy"][strategy_name][key].get(k2, 0) + v2
+                            )
+                    else:
+                        result["by_strategy"][strategy_name][key] = (
+                            result["by_strategy"][strategy_name].get(key, 0) + val
+                        )
+
+        return result
+
+    def delete_older_than(self, before: datetime) -> int:
+        """Delete snapshots older than the given time. Returns count deleted."""
+        result = self.session.execute(
+            select(InstrumentationSnapshot).where(InstrumentationSnapshot.timestamp < before)
+        )
+        rows = list(result.scalars().all())
+        count = len(rows)
+        for row in rows:
+            self.session.delete(row)
+        self.session.flush()
+        return count
