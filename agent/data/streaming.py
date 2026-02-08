@@ -19,6 +19,7 @@ Connection-Limit Handling:
 
 import asyncio
 import contextlib
+import time as _time
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
@@ -43,6 +44,11 @@ from agent.monitoring.instrumentation import get_instrumentation
 MAX_RECONNECT_ATTEMPTS = 20  # only counts non-connection-limit failures
 INITIAL_RECONNECT_DELAY = 2.0  # seconds
 MAX_RECONNECT_DELAY = 60.0  # seconds
+
+# Minimum time _run_forever() must run before we consider the connection
+# successful.  Quick returns indicate auth/subscription errors that the
+# Alpaca SDK handled internally without re-raising.
+MIN_SUCCESSFUL_RUN_SECONDS = 5.0
 
 # Subscription caps are now driven by settings.effective_max_websocket_symbols
 # which auto-selects based on feed tier:
@@ -136,6 +142,11 @@ class DataStreamer:
         self._on_disconnect_callbacks: list[Callable[[str], None]] = []
         self._on_reconnect_callbacks: list[Callable[[], None]] = []
 
+        # Connection tracking: detect silent auth failures and deferred
+        # reconnect notification (only fires once real data arrives).
+        self._data_received_this_session = False
+        self._needs_reconnect_notification = False
+
         # Subscribed symbols
         self._subscribed_bars: set[str] = set()
         self._subscribed_quotes: set[str] = set()
@@ -186,9 +197,28 @@ class DataStreamer:
         """Register a callback for successful reconnection."""
         self._on_reconnect_callbacks.append(callback)
 
+    def _fire_reconnect_callbacks_if_needed(self) -> None:
+        """Fire reconnect callbacks on first data receipt after reconnection.
+
+        Reconnect notifications are deferred until real data arrives so that
+        silent auth/subscription failures (where the Alpaca SDK returns
+        without raising) never trigger a spurious "reconnected" message.
+        """
+        if self._needs_reconnect_notification:
+            self._needs_reconnect_notification = False
+            logger.info("Data stream confirmed working — firing reconnect callbacks")
+            for callback in self._on_reconnect_callbacks:
+                try:
+                    callback()
+                except Exception as e:
+                    logger.error(f"Error in reconnect callback: {e}")
+
     async def _handle_bar(self, bar: Bar) -> None:
         """Handle incoming bar data."""
         self._last_data_time = datetime.now()
+        if not self._data_received_this_session:
+            self._data_received_this_session = True
+            self._fire_reconnect_callbacks_if_needed()
 
         logger.debug(f"Received bar: {bar.symbol} @ {bar.close}")
 
@@ -215,6 +245,9 @@ class DataStreamer:
     async def _handle_quote(self, quote: Quote) -> None:
         """Handle incoming quote data."""
         self._last_data_time = datetime.now()
+        if not self._data_received_this_session:
+            self._data_received_this_session = True
+            self._fire_reconnect_callbacks_if_needed()
 
         # Record data reception for instrumentation
         get_instrumentation().record_quote(quote.symbol)
@@ -237,6 +270,9 @@ class DataStreamer:
     async def _handle_trade(self, trade: Trade) -> None:
         """Handle incoming trade data."""
         self._last_data_time = datetime.now()
+        if not self._data_received_this_session:
+            self._data_received_this_session = True
+            self._fire_reconnect_callbacks_if_needed()
 
         # Record data reception for instrumentation
         get_instrumentation().record_trade_tick(trade.symbol)
@@ -409,30 +445,73 @@ class DataStreamer:
                     self._resubscribe_all()
 
                 self._is_running = True
+                self._data_received_this_session = False
                 logger.info(
                     f"Data stream connecting to Alpaca WebSocket... "
                     f"Subscriptions: bars={len(self._subscribed_bars)}, "
                     f"quotes={len(self._subscribed_quotes)}"
                 )
 
-                # Notify reconnection if this is a retry (not first attempt)
+                # Reconnect callbacks are now deferred until the first real
+                # data arrives (see _fire_reconnect_callbacks_if_needed).
+                # This prevents spurious "reconnected" messages when the SDK
+                # silently fails auth/subscription checks.
                 if not is_first_attempt:
-                    for callback in self._on_reconnect_callbacks:
-                        try:
-                            callback()
-                        except Exception as e:
-                            logger.error(f"Error in reconnect callback: {e}")
+                    self._needs_reconnect_notification = True
 
                 is_first_attempt = False
+                run_start = _time.monotonic()
                 await self._stream._run_forever()
+                run_elapsed = _time.monotonic() - run_start
 
-                # If _run_forever returns normally, the connection succeeded
-                # at some point. Reset retry counter.
-                conn_mgr.record_connected(StreamType.STOCK_DATA)
-                self._reconnect_attempts = 0
+                # _run_forever() returned normally.  The Alpaca SDK can
+                # return without raising when auth/subscription fails
+                # (it prints the error internally).  Detect this by
+                # checking whether data was ever received and how long
+                # the session lasted.
+                if self._data_received_this_session and run_elapsed >= MIN_SUCCESSFUL_RUN_SECONDS:
+                    # Connection genuinely worked, then disconnected.
+                    conn_mgr.record_connected(StreamType.STOCK_DATA)
+                    self._reconnect_attempts = 0
+                    logger.info(f"Data stream ended after {run_elapsed:.0f}s — will reconnect")
+                else:
+                    # Quick return with no data — likely auth/subscription
+                    # error swallowed by the SDK.
+                    self._is_running = False
+                    self._needs_reconnect_notification = False
+                    await self._close_stream()
+                    conn_mgr.record_disconnected(StreamType.STOCK_DATA)
+
+                    self._reconnect_attempts += 1
+                    if self._reconnect_attempts >= MAX_RECONNECT_ATTEMPTS:
+                        logger.error(
+                            f"Max reconnection attempts ({MAX_RECONNECT_ATTEMPTS}) "
+                            f"reached. Stream returned in {run_elapsed:.1f}s with no "
+                            f"data received. Check your Alpaca subscription plan and "
+                            f"ALPACA_DATA_FEED setting (current feed: {self._feed.value})."
+                        )
+                        raise RuntimeError(
+                            f"Data stream failed {MAX_RECONNECT_ATTEMPTS} times "
+                            f"without receiving data. Likely subscription/auth "
+                            f"misconfiguration (feed={self._feed.value})."
+                        )
+
+                    delay = min(
+                        INITIAL_RECONNECT_DELAY * (2**self._reconnect_attempts),
+                        MAX_RECONNECT_DELAY,
+                    )
+                    logger.warning(
+                        f"Data stream returned after {run_elapsed:.1f}s with no "
+                        f"data — possible auth or subscription error. "
+                        f"Check ALPACA_DATA_FEED setting (current: {self._feed.value}). "
+                        f"Retrying in {delay:.1f}s "
+                        f"(attempt {self._reconnect_attempts}/{MAX_RECONNECT_ATTEMPTS})"
+                    )
+                    await asyncio.sleep(delay)
 
             except Exception as e:
                 self._is_running = False
+                self._needs_reconnect_notification = False
                 error_msg = str(e)
                 logger.error(f"Data stream disconnected: {error_msg}")
 
@@ -448,6 +527,19 @@ class DataStreamer:
                         logger.error(f"Error in disconnect callback: {cb_error}")
 
                 if not self._should_reconnect:
+                    raise
+
+                # Detect permanent auth/subscription errors — these will
+                # never resolve by retrying.
+                is_subscription_error = "insufficient subscription" in error_msg.lower()
+                if is_subscription_error:
+                    logger.error(
+                        f"Alpaca rejected connection: '{error_msg}'. "
+                        f"Current feed: {self._feed.value}. "
+                        f"If using SIP feed, verify your Alpaca subscription "
+                        f"includes real-time data. For free/paper accounts, "
+                        f"set ALPACA_DATA_FEED=iex."
+                    )
                     raise
 
                 # Detect "connection limit exceeded" or HTTP 429
@@ -526,23 +618,61 @@ class DataStreamer:
                     self._resubscribe_all()
 
                 self._is_running = True
+                self._data_received_this_session = False
                 logger.info("Starting data stream (sync)...")
 
+                # Defer reconnect notification until data arrives.
                 if not is_first_attempt:
-                    for callback in self._on_reconnect_callbacks:
-                        try:
-                            callback()
-                        except Exception as e:
-                            logger.error(f"Error in reconnect callback: {e}")
+                    self._needs_reconnect_notification = True
 
                 is_first_attempt = False
+                run_start = _time.monotonic()
                 self._stream.run()
+                run_elapsed = _time.monotonic() - run_start
 
-                conn_mgr.record_connected(StreamType.STOCK_DATA)
-                self._reconnect_attempts = 0
+                if self._data_received_this_session and run_elapsed >= MIN_SUCCESSFUL_RUN_SECONDS:
+                    conn_mgr.record_connected(StreamType.STOCK_DATA)
+                    self._reconnect_attempts = 0
+                    logger.info(f"Data stream ended after {run_elapsed:.0f}s — will reconnect")
+                else:
+                    self._is_running = False
+                    self._needs_reconnect_notification = False
+                    if self._stream is not None:
+                        with contextlib.suppress(Exception):
+                            self._stream.stop()
+                        self._stream = None
+                    conn_mgr.record_disconnected(StreamType.STOCK_DATA)
+
+                    self._reconnect_attempts += 1
+                    if self._reconnect_attempts >= MAX_RECONNECT_ATTEMPTS:
+                        logger.error(
+                            f"Max reconnection attempts ({MAX_RECONNECT_ATTEMPTS}) "
+                            f"reached. Stream returned in {run_elapsed:.1f}s with no "
+                            f"data received. Check your Alpaca subscription plan and "
+                            f"ALPACA_DATA_FEED setting (current feed: {self._feed.value})."
+                        )
+                        raise RuntimeError(
+                            f"Data stream failed {MAX_RECONNECT_ATTEMPTS} times "
+                            f"without receiving data. Likely subscription/auth "
+                            f"misconfiguration (feed={self._feed.value})."
+                        )
+
+                    delay = min(
+                        INITIAL_RECONNECT_DELAY * (2**self._reconnect_attempts),
+                        MAX_RECONNECT_DELAY,
+                    )
+                    logger.warning(
+                        f"Data stream returned after {run_elapsed:.1f}s with no "
+                        f"data — possible auth or subscription error. "
+                        f"Check ALPACA_DATA_FEED setting (current: {self._feed.value}). "
+                        f"Retrying in {delay:.1f}s "
+                        f"(attempt {self._reconnect_attempts}/{MAX_RECONNECT_ATTEMPTS})"
+                    )
+                    time.sleep(delay)
 
             except Exception as e:
                 self._is_running = False
+                self._needs_reconnect_notification = False
                 error_msg = str(e)
                 logger.error(f"Data stream disconnected: {error_msg}")
 
@@ -560,6 +690,18 @@ class DataStreamer:
                         logger.error(f"Error in disconnect callback: {cb_error}")
 
                 if not self._should_reconnect:
+                    raise
+
+                # Detect permanent auth/subscription errors.
+                is_subscription_error = "insufficient subscription" in error_msg.lower()
+                if is_subscription_error:
+                    logger.error(
+                        f"Alpaca rejected connection: '{error_msg}'. "
+                        f"Current feed: {self._feed.value}. "
+                        f"If using SIP feed, verify your Alpaca subscription "
+                        f"includes real-time data. For free/paper accounts, "
+                        f"set ALPACA_DATA_FEED=iex."
+                    )
                     raise
 
                 is_connection_limit = "connection limit" in error_msg.lower() or "429" in error_msg
