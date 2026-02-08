@@ -21,6 +21,7 @@ from datetime import datetime, time, timedelta
 from decimal import Decimal
 
 import pytz
+from alpaca.data.enums import DataFeed
 from alpaca.data.requests import StockBarsRequest
 from alpaca.data.timeframe import TimeFrame
 from dateutil import parser as date_parser
@@ -683,6 +684,9 @@ class TradingAgent:
         total_bars_loaded = 0
         orb_ranges_built = 0
 
+        # Use the correct data feed for REST calls
+        data_feed = DataFeed.IEX if self._settings.use_iex_feed else DataFeed.SIP
+
         # Pre-compute ORB range window for extracting bars before trimming
         orb_range_start = time(9, 30)
         orb_range_end = time(9, 45)
@@ -697,6 +701,7 @@ class TradingAgent:
                     timeframe=TimeFrame.Minute,
                     start=start_time,
                     end=now_et,
+                    feed=data_feed,
                 )
                 bars_response = self._broker._data_client.get_stock_bars(request)
 

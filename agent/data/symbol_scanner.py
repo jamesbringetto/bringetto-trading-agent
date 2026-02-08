@@ -15,6 +15,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from alpaca.common.exceptions import APIError
+from alpaca.data.enums import DataFeed
 from alpaca.data.historical import StockHistoricalDataClient
 from alpaca.data.requests import (
     StockBarsRequest,
@@ -105,6 +106,7 @@ class SymbolScanner:
         self._max_symbols = settings.effective_scanner_max_symbols
         self._batch_size = settings.effective_scanner_batch_size
         self._batch_delay = settings.effective_scanner_batch_delay
+        self._feed = DataFeed.IEX if settings.use_iex_feed else DataFeed.SIP
         self._feed_tier = "IEX" if settings.use_iex_feed else "SIP"
 
         logger.info(
@@ -224,6 +226,7 @@ class SymbolScanner:
                         symbol_or_symbols=batch,
                         timeframe=TimeFrame.Day,
                         start=start_date,
+                        feed=self._feed,
                     )
                     bars_response = self._data_client.get_stock_bars(request)
 
@@ -397,7 +400,7 @@ class SymbolScanner:
 
             for attempt in range(MAX_BATCH_RETRIES + 1):
                 try:
-                    request = StockSnapshotRequest(symbol_or_symbols=batch)
+                    request = StockSnapshotRequest(symbol_or_symbols=batch, feed=self._feed)
                     snapshots = self._data_client.get_stock_snapshot(request)
 
                     for symbol, snapshot in snapshots.items():
@@ -511,6 +514,7 @@ class SymbolScanner:
                         symbol_or_symbols=batch,
                         timeframe=TimeFrame.Day,
                         start=start_date,
+                        feed=self._feed,
                     )
                     bars_response = self._data_client.get_stock_bars(request)
 
