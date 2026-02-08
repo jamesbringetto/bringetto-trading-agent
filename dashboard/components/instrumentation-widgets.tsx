@@ -1,164 +1,63 @@
 'use client';
 
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { api, DataReceptionStats, EvaluationSummary, StrategyEvaluation, FunnelData, StrategyEvaluationStats } from '@/lib/api';
 import {
-  Activity,
-  BarChart3,
   CheckCircle,
   XCircle,
   Clock,
   Zap,
-  Database,
-  RefreshCw,
   ChevronDown,
   ChevronRight,
-  TrendingUp,
-  TrendingDown,
   AlertTriangle,
   ArrowRight,
 } from 'lucide-react';
 import { useTimezoneStore, TIMEZONE_OPTIONS } from '@/lib/timezone-store';
 import { StrategyTooltip } from '@/components/strategy-tooltip';
+import type {
+  DataReceptionStats,
+  EvaluationSummary,
+  StrategyEvaluation,
+  FunnelData,
+} from '@/lib/api';
 
-export default function InstrumentationPage() {
-  const { data: status, isLoading, refetch, dataUpdatedAt } = useQuery({
-    queryKey: ['instrumentation-status'],
-    queryFn: () => api.getInstrumentationStatus('session'),
-    refetchInterval: 5000, // Refresh every 5 seconds
-  });
-
-  const { data: evaluations } = useQuery({
-    queryKey: ['evaluations'],
-    queryFn: () => api.getEvaluations(60, undefined, undefined, undefined, 50),
-    refetchInterval: 5000,
-  });
-
-  if (isLoading) {
-    return (
-      <div className="space-y-4">
-        <h1 className="text-2xl font-bold">Instrumentation</h1>
-        <div className="space-y-3">
-          {[...Array(3)].map((_, i) => (
-            <div key={i} className="h-48 animate-pulse rounded-lg bg-muted" />
-          ))}
-        </div>
-      </div>
-    );
-  }
-
+function StatBox({
+  label,
+  value,
+  subValue,
+  subLabel,
+  highlight,
+}: {
+  label: string;
+  value: string;
+  subValue?: string;
+  subLabel?: string;
+  highlight?: 'green' | 'red';
+}) {
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">Instrumentation</h1>
-          <p className="text-muted-foreground">
-            Real-time observability for market data and trade decisions
-          </p>
-        </div>
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => refetch()}
-            className="flex items-center gap-2 rounded-lg border px-3 py-2 text-sm hover:bg-muted transition-colors"
-          >
-            <RefreshCw className="h-4 w-4" />
-            Refresh
-          </button>
-        </div>
-      </div>
-
-      {/* Data Reception Section */}
-      <section>
-        <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
-          <Database className="h-5 w-5" />
-          Data Reception Status
-        </h2>
-        {status?.data_reception ? (
-          <DataReceptionCard stats={status.data_reception} />
-        ) : (
-          <div className="rounded-lg border bg-card p-6 text-center text-muted-foreground">
-            No data reception stats available
-          </div>
-        )}
-      </section>
-
-      {/* Decision Funnel Section */}
-      <section>
-        <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
-          <TrendingDown className="h-5 w-5" />
-          Decision Pipeline Funnel
-        </h2>
-        {status?.evaluations?.funnel ? (
-          <FunnelCard
-            funnel={status.evaluations.funnel}
-            riskBreakdown={status.evaluations.risk_rejection_breakdown}
-            totalEvaluations={status.evaluations.total_evaluations}
-          />
-        ) : (
-          <div className="rounded-lg border bg-card p-6 text-center text-muted-foreground">
-            No funnel data available
-          </div>
-        )}
-      </section>
-
-      {/* Evaluation Summary Section */}
-      <section>
-        <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
-          <BarChart3 className="h-5 w-5" />
-          Strategy Evaluation Summary
-        </h2>
-        {status?.evaluations ? (
-          <EvaluationSummaryCard summary={status.evaluations} />
-        ) : (
-          <div className="rounded-lg border bg-card p-6 text-center text-muted-foreground">
-            No evaluation data available
-          </div>
-        )}
-      </section>
-
-      {/* Recent Evaluations Section */}
-      <section>
-        <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
-          <Activity className="h-5 w-5" />
-          Recent Evaluations
-        </h2>
-        {evaluations && evaluations.length > 0 ? (
-          <EvaluationsList evaluations={evaluations} />
-        ) : (
-          <div className="rounded-lg border bg-card p-6 text-center text-muted-foreground">
-            No recent evaluations. Evaluations will appear here once the trading loop starts evaluating strategies.
-          </div>
-        )}
-      </section>
-
-      {/* Last Updated */}
-      <LastUpdatedFooter timestamp={dataUpdatedAt} />
+    <div className="text-center">
+      <p className="text-sm text-muted-foreground">{label}</p>
+      <p
+        className={`text-2xl font-bold ${
+          highlight === 'green'
+            ? 'text-green-600'
+            : highlight === 'red'
+            ? 'text-red-600'
+            : ''
+        }`}
+      >
+        {value}
+      </p>
+      {subValue && (
+        <p className="text-xs text-muted-foreground">{subValue}</p>
+      )}
+      {subLabel && (
+        <p className="text-xs text-muted-foreground">{subLabel}</p>
+      )}
     </div>
   );
 }
 
-
-function LastUpdatedFooter({ timestamp }: { timestamp: number }) {
-  const { timezone } = useTimezoneStore();
-  const tzOption = TIMEZONE_OPTIONS.find((tz) => tz.value === timezone);
-
-  const formattedTime = new Intl.DateTimeFormat('en-US', {
-    timeZone: timezone,
-    hour: 'numeric',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: true,
-  }).format(new Date(timestamp));
-
-  return (
-    <p className="text-xs text-muted-foreground text-right">
-      Last updated: {formattedTime} {tzOption?.abbrev}
-    </p>
-  );
-}
-
-function DataReceptionCard({ stats }: { stats: DataReceptionStats }) {
+export function DataReceptionCard({ stats }: { stats: DataReceptionStats }) {
   const { timezone } = useTimezoneStore();
   const isReceivingData = stats.total_bars > 0 || stats.total_quotes > 0 || stats.total_trades > 0;
   const isFresh = stats.data_freshness_seconds !== null && stats.data_freshness_seconds < 60;
@@ -253,7 +152,7 @@ function DataReceptionCard({ stats }: { stats: DataReceptionStats }) {
   );
 }
 
-function EvaluationSummaryCard({ summary }: { summary: EvaluationSummary }) {
+export function EvaluationSummaryCard({ summary }: { summary: EvaluationSummary }) {
   const strategies = Object.entries(summary.by_strategy || {});
   const [expandedStrategy, setExpandedStrategy] = useState<string | null>(null);
 
@@ -424,7 +323,7 @@ function EvaluationSummaryCard({ summary }: { summary: EvaluationSummary }) {
   );
 }
 
-function EvaluationsList({ evaluations }: { evaluations: StrategyEvaluation[] }) {
+export function EvaluationsList({ evaluations }: { evaluations: StrategyEvaluation[] }) {
   const { timezone } = useTimezoneStore();
 
   const formatTime = (timestamp: string) => {
@@ -493,50 +392,13 @@ function EvaluationsList({ evaluations }: { evaluations: StrategyEvaluation[] })
   );
 }
 
-function StatBox({
-  label,
-  value,
-  subValue,
-  subLabel,
-  highlight,
-}: {
-  label: string;
-  value: string;
-  subValue?: string;
-  subLabel?: string;
-  highlight?: 'green' | 'red';
-}) {
-  return (
-    <div className="text-center">
-      <p className="text-sm text-muted-foreground">{label}</p>
-      <p
-        className={`text-2xl font-bold ${
-          highlight === 'green'
-            ? 'text-green-600'
-            : highlight === 'red'
-            ? 'text-red-600'
-            : ''
-        }`}
-      >
-        {value}
-      </p>
-      {subValue && (
-        <p className="text-xs text-muted-foreground">{subValue}</p>
-      )}
-      {subLabel && (
-        <p className="text-xs text-muted-foreground">{subLabel}</p>
-      )}
-    </div>
-  );
-}
-
 interface FunnelCardProps {
   funnel: FunnelData;
   riskBreakdown?: Record<string, number>;
   totalEvaluations: number;
 }
 
-function FunnelCard({ funnel, riskBreakdown, totalEvaluations }: FunnelCardProps) {
+export function FunnelCard({ funnel, riskBreakdown, totalEvaluations }: FunnelCardProps) {
   const [showRiskBreakdown, setShowRiskBreakdown] = useState(false);
 
   // Safely access funnel values with fallback to 0

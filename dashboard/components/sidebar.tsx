@@ -7,7 +7,6 @@ import {
   TrendingUp,
   History,
   Settings,
-  Activity,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { TimezoneSelector } from './timezone-selector';
@@ -15,7 +14,6 @@ import { TimezoneSelector } from './timezone-selector';
 const navigation = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
   { name: 'Trades', href: '/trades', icon: History },
-  { name: 'Instrumentation', href: '/instrumentation', icon: Activity },
   { name: 'Settings', href: '/settings', icon: Settings },
 ];
 

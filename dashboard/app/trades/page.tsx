@@ -4,7 +4,6 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { formatCurrency } from '@/lib/utils';
 import { ArrowUpRight, ArrowDownRight, Clock } from 'lucide-react';
-import { MarketStatusWidget } from '@/components/market-status';
 import { StrategyTooltip } from '@/components/strategy-tooltip';
 
 export default function TradesPage() {
@@ -143,11 +142,7 @@ export default function TradesPage() {
 
         {!trades?.length && (
           <div className="p-8">
-            <div className="max-w-md mx-auto space-y-6">
-              {/* Market Status Widget */}
-              <MarketStatusWidget />
-
-              {/* No trades message */}
+            <div className="max-w-md mx-auto">
               <div className="text-center space-y-2">
                 <div className="flex items-center justify-center gap-2 text-muted-foreground">
                   <Clock className="h-5 w-5" />
