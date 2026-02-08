@@ -57,6 +57,9 @@ export function Sidebar() {
 
       {/* Legal Links */}
       <div className="border-t px-4 py-3">
+        <p className="text-[10px] text-muted-foreground text-center mb-2">
+          Not financial advice. For educational purposes only.
+        </p>
         <div className="flex justify-center gap-3 text-xs text-muted-foreground">
           <Link href="/terms" className="hover:text-foreground hover:underline">
             Terms
@@ -64,6 +67,10 @@ export function Sidebar() {
           <span>|</span>
           <Link href="/privacy" className="hover:text-foreground hover:underline">
             Privacy
+          </Link>
+          <span>|</span>
+          <Link href="/disclaimer" className="hover:text-foreground hover:underline">
+            Disclaimer
           </Link>
         </div>
       </div>

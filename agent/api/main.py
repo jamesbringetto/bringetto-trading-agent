@@ -84,7 +84,14 @@ def create_app() -> FastAPI:
 
     app = FastAPI(
         title="Bringetto Trading Agent API",
-        description="API for the AI-powered day trading agent",
+        description=(
+            "API for the Bringetto Trading Agent - an educational and experimental "
+            "algorithmic trading project. **DISCLAIMER: This API and its data do not "
+            "constitute financial advice. The creator is not a financial advisor or "
+            "licensed investment professional. All trading data shown is from paper "
+            "trading (simulated) and past performance does not guarantee future results. "
+            "See /disclaimer for full details.**"
+        ),
         version="0.1.0",
         lifespan=lifespan,
     )
@@ -117,6 +124,12 @@ def create_app() -> FastAPI:
             "version": "0.1.0",
             "status": "running",
             "environment": settings.environment,
+            "disclaimer": (
+                "This application is for educational and experimental purposes only. "
+                "It does not constitute financial advice. The creator is not a financial "
+                "advisor or licensed investment professional. Past performance does not "
+                "guarantee future results."
+            ),
         }
 
     @app.get("/health", response_model=HealthResponse, tags=["health"])

@@ -22,6 +22,7 @@ import {
   Database,
 } from 'lucide-react';
 import { useTimezoneStore, TIMEZONE_OPTIONS } from '@/lib/timezone-store';
+import { DisclaimerBanner } from '@/components/disclaimer-banner';
 
 export default function Dashboard() {
   const { data: portfolio, isLoading: portfolioLoading } = useQuery({
@@ -56,6 +57,9 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6">
+      {/* Legal Disclaimer */}
+      <DisclaimerBanner />
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>

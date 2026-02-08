@@ -8,7 +8,8 @@ const inter = Inter({ subsets: ['latin'] });
 
 export const metadata: Metadata = {
   title: 'Bringetto Trading Agent',
-  description: 'AI-powered day trading dashboard',
+  description:
+    'Educational and experimental algorithmic trading dashboard. Not financial advice.',
 };
 
 export default function RootLayout({

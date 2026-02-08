@@ -5,6 +5,7 @@ import { api } from '@/lib/api';
 import { formatCurrency } from '@/lib/utils';
 import { ArrowUpRight, ArrowDownRight, Clock } from 'lucide-react';
 import { StrategyTooltip } from '@/components/strategy-tooltip';
+import { DisclaimerBanner } from '@/components/disclaimer-banner';
 
 export default function TradesPage() {
   const { data: trades, isLoading } = useQuery({
@@ -32,6 +33,8 @@ export default function TradesPage() {
 
   return (
     <div className="space-y-6">
+      <DisclaimerBanner />
+
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold">Trade History</h1>
