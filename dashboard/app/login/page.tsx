@@ -69,6 +69,16 @@ export default function LoginPage() {
           </button>
         </form>
 
+        <div className="rounded-lg border border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-950/30 p-3">
+          <p className="text-xs text-amber-800 dark:text-amber-300 text-center leading-relaxed">
+            This application is for educational and experimental purposes only and does not
+            constitute financial advice. By signing in, you agree to the{' '}
+            <Link href="/terms" className="underline hover:text-amber-900 dark:hover:text-amber-200">
+              Terms of Use
+            </Link>.
+          </p>
+        </div>
+
         <div className="text-center text-sm text-muted-foreground">
           <Link href="/terms" className="hover:text-foreground hover:underline">
             Terms of Use
@@ -76,6 +86,10 @@ export default function LoginPage() {
           <span className="mx-2">|</span>
           <Link href="/privacy" className="hover:text-foreground hover:underline">
             Privacy Policy
+          </Link>
+          <span className="mx-2">|</span>
+          <Link href="/disclaimer" className="hover:text-foreground hover:underline">
+            Disclaimer
           </Link>
         </div>
       </div>

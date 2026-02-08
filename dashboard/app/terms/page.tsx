@@ -54,11 +54,20 @@ export default function TermsPage() {
 
           <section>
             <h2 className="text-xl font-semibold mb-3">4. No Financial Advice</h2>
+            <p className="text-muted-foreground leading-relaxed mb-3">
+              <strong>The creator of this Application is not a financial advisor, broker, dealer,
+              or licensed investment professional.</strong> The creator has no formal qualifications
+              in finance, investment management, or securities trading. This Application was built
+              as a personal educational and experimental project.
+            </p>
             <p className="text-muted-foreground leading-relaxed">
               The Application does not provide financial, investment, tax, or legal advice.
-              Any trading strategies, signals, or analysis provided by the Application are for
-              educational and experimental purposes only. You should consult with qualified
-              professionals before making any investment decisions.
+              Any trading strategies, signals, analysis, or performance data provided by the
+              Application are for educational and experimental purposes only and should not be
+              relied upon for making investment decisions. You should consult with qualified
+              financial, legal, and tax professionals before making any investment decisions.
+              Past performance, whether from paper trading or backtesting, does not guarantee
+              future results.
             </p>
           </section>
 
@@ -121,7 +130,13 @@ export default function TermsPage() {
           </section>
         </div>
 
-        <div className="mt-12 pt-6 border-t">
+        <div className="mt-12 pt-6 border-t flex gap-4">
+          <Link
+            href="/disclaimer"
+            className="text-sm text-primary hover:underline"
+          >
+            View Disclaimer &rarr;
+          </Link>
           <Link
             href="/privacy"
             className="text-sm text-primary hover:underline"
