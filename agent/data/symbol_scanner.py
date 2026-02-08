@@ -10,6 +10,7 @@ The scanner runs pre-market each day and produces a filtered universe
 that gets fed to strategies and the data streamer.
 """
 
+import random
 import time
 from datetime import datetime, timedelta
 from typing import Any
@@ -108,6 +109,7 @@ class SymbolScanner:
         self._batch_delay = settings.effective_scanner_batch_delay
         self._feed = DataFeed.IEX if settings.use_iex_feed else DataFeed.SIP
         self._feed_tier = "IEX" if settings.use_iex_feed else "SIP"
+        self._max_candidates = settings.effective_scanner_max_candidates
 
         logger.info(
             f"SymbolScanner initialized ({self._feed_tier} tier) - "
@@ -116,7 +118,8 @@ class SymbolScanner:
             f"lookback={self._lookback_days}d, "
             f"max_symbols={self._max_symbols}, "
             f"batch_size={self._batch_size}, "
-            f"batch_delay={self._batch_delay}s"
+            f"batch_delay={self._batch_delay}s, "
+            f"max_candidates={self._max_candidates or 'unlimited'}"
         )
 
     @property
@@ -335,6 +338,17 @@ class SymbolScanner:
             )
 
         symbols = [a["symbol"] for a in assets]
+
+        # On IEX (free tier), cap the number of candidates we screen to save
+        # API calls and avoid blocking startup for 15+ minutes.  Shuffle first
+        # so we get a diverse cross-section instead of scanning alphabetically.
+        if self._max_candidates and len(symbols) > self._max_candidates:
+            random.shuffle(symbols)
+            logger.info(
+                f"Capping candidates from {len(symbols)} to {self._max_candidates} "
+                f"({self._feed_tier} tier limit)"
+            )
+            symbols = symbols[: self._max_candidates]
 
         # Step 2: Screen by price and volume using historical bars
         qualified, volume_map, price_map = self._screen_by_bars(

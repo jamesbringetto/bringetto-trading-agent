@@ -160,6 +160,7 @@ class Settings(BaseSettings):
     _IEX_SCANNER_BATCH_SIZE: int = 25
     _IEX_SCANNER_BATCH_DELAY: float = 2.0  # seconds between REST batches
     _IEX_RESCAN_INTERVAL_MINUTES: int = 120  # less frequent to save API calls
+    _IEX_MAX_SCAN_CANDIDATES: int = 500  # max candidates to screen (saves API calls)
 
     # SIP practical caps (Algo Trader Plus / $99 mo)
     _SIP_MAX_WEBSOCKET_SYMBOLS: int = 2500
@@ -203,6 +204,18 @@ class Settings(BaseSettings):
         if self.use_sip_feed:
             return self._SIP_SCANNER_BATCH_DELAY
         return self._IEX_SCANNER_BATCH_DELAY
+
+    @property
+    def effective_scanner_max_candidates(self) -> int | None:
+        """Max candidates to screen before applying volume/price filters.
+
+        On IEX (free tier) this caps the number of symbols we fetch bars for,
+        drastically reducing startup time and API usage.  Returns None on SIP
+        (no cap needed — rate limits are effectively unlimited).
+        """
+        if self.use_sip_feed:
+            return None
+        return self._IEX_MAX_SCAN_CANDIDATES
 
     @property
     def effective_rescan_interval_minutes(self) -> int:

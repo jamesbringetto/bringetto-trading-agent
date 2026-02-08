@@ -1773,8 +1773,9 @@ class TradingAgent:
         # Reset pre-market gap scan flag for the new day
         self._premarket_gaps_scanned_today = False
 
-        # Re-run symbol scan for the new trading day
-        self._run_symbol_scan()
+        # Re-run symbol scan for the new trading day (in a thread to avoid
+        # blocking the event loop during the batched REST calls).
+        await asyncio.to_thread(self._run_symbol_scan)
 
         logger.info("Daily reset complete")
 
@@ -1914,8 +1915,10 @@ class TradingAgent:
         # Sync existing positions from broker on startup
         self._sync_positions_on_startup()
 
-        # Run initial symbol scan to discover tradeable universe
-        self._run_symbol_scan()
+        # Run initial symbol scan to discover tradeable universe.
+        # Runs in a thread to avoid blocking the event loop (and the /health endpoint)
+        # while the scanner makes hundreds of batched REST calls with time.sleep() delays.
+        await asyncio.to_thread(self._run_symbol_scan)
 
         # Start WebSocket streaming for trade updates
         await self._start_streaming()
@@ -1934,7 +1937,8 @@ class TradingAgent:
         # available immediately instead of waiting 15-50+ minutes for streaming
         # bars to accumulate.  Also bootstraps ORB opening ranges if the agent
         # started after the 9:30-9:45 AM ET range-collection window.
-        self._preload_historical_bars()
+        # Runs in a thread to avoid blocking the event loop during REST calls.
+        await asyncio.to_thread(self._preload_historical_bars)
 
         # Start instrumentation heartbeat for data reception monitoring
         await get_instrumentation().start_heartbeat()
