@@ -108,14 +108,16 @@ class Settings(BaseSettings):
 
     # Database
     database_url: PostgresDsn = Field(
-        default="postgresql://postgres:postgres@localhost:5432/trading_agent"
+        ..., description="PostgreSQL connection URL (must be set via DATABASE_URL env var)"
     )
 
     # Redis (Optional)
     redis_url: RedisDsn | None = Field(default=None)
 
     # API Configuration
-    api_secret_key: str = Field(default="change_this_to_a_random_secret_key")
+    api_secret_key: str = Field(
+        ..., description="API secret key for authentication (must be set via API_SECRET_KEY env var)"
+    )
     api_host: str = Field(default="0.0.0.0")
     api_port: int = Field(default=8000, ge=1, le=65535)
 

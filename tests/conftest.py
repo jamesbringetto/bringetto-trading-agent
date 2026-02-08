@@ -5,11 +5,12 @@ from decimal import Decimal
 
 import pytest
 
-# Set test environment
-os.environ["ENVIRONMENT"] = "paper"
-os.environ["ALPACA_API_KEY"] = "test_key"
-os.environ["ALPACA_SECRET_KEY"] = "test_secret"
-os.environ["DATABASE_URL"] = "postgresql://test:test@localhost:5432/test_db"
+# Set test environment defaults (real env vars take precedence)
+os.environ.setdefault("ENVIRONMENT", "paper")
+os.environ.setdefault("ALPACA_API_KEY", "test_placeholder_key")
+os.environ.setdefault("ALPACA_SECRET_KEY", "test_placeholder_secret")
+os.environ.setdefault("DATABASE_URL", "postgresql://localhost:5432/test_db")
+os.environ.setdefault("API_SECRET_KEY", "test_api_secret_not_for_production")
 
 
 @pytest.fixture
