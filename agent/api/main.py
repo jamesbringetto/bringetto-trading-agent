@@ -54,16 +54,24 @@ async def lifespan(app: FastAPI):
     # Import here to avoid circular imports
     from agent.main import TradingAgent
 
-    # Create and start the trading agent as a background task
-    logger.info("Initializing trading agent in API process...")
-    _agent_instance = TradingAgent()
+    # Create and start the trading agent as a background task.
+    # Wrapped in try/except so the API server starts even if the agent fails.
+    # This ensures the /health endpoint is always reachable for Railway.
+    try:
+        logger.info("Initializing trading agent in API process...")
+        _agent_instance = TradingAgent()
 
-    _agent_task = asyncio.create_task(
-        _agent_instance.run(),
-        name="trading_agent"
-    )
+        _agent_task = asyncio.create_task(
+            _agent_instance.run(),
+            name="trading_agent"
+        )
 
-    logger.info("Trading agent started as background task")
+        logger.info("Trading agent started as background task")
+    except Exception as e:
+        logger.error(f"Failed to initialize trading agent: {e}")
+        logger.warning("API server will start without trading agent")
+        _agent_instance = None
+        _agent_task = None
 
     yield
 
@@ -137,6 +145,9 @@ def create_app() -> FastAPI:
         """
         Health check endpoint for Railway/monitoring.
 
+        Always returns HTTP 200 so Railway considers the service alive.
+        The response body indicates actual component health via the status field.
+
         Returns status of:
         - Database connection
         - Alpaca connection
@@ -146,7 +157,7 @@ def create_app() -> FastAPI:
         state = get_agent_state()
 
         # Check database
-        db_healthy = True
+        db_healthy = False
         try:
             from sqlalchemy import text
 
@@ -154,9 +165,9 @@ def create_app() -> FastAPI:
 
             with get_session() as session:
                 session.execute(text("SELECT 1"))
+                db_healthy = True
         except Exception as e:
             logger.error(f"Database health check failed: {e}")
-            db_healthy = False
 
         # Check Alpaca
         alpaca_healthy = False
@@ -168,7 +179,9 @@ def create_app() -> FastAPI:
                 logger.error(f"Alpaca health check failed: {e}")
 
         # Count active strategies
-        active_strategies = len([s for s in state.get("strategies", []) if s.is_active])
+        active_strategies = 0
+        with contextlib.suppress(Exception):
+            active_strategies = len([s for s in state.get("strategies", []) if s.is_active])
 
         # Count open positions
         open_positions = 0
@@ -179,7 +192,12 @@ def create_app() -> FastAPI:
             except Exception:
                 pass
 
-        status = "healthy" if (db_healthy and alpaca_healthy) else "unhealthy"
+        if db_healthy and alpaca_healthy:
+            status = "healthy"
+        elif db_healthy or alpaca_healthy:
+            status = "degraded"
+        else:
+            status = "starting"
 
         return HealthResponse(
             status=status,
