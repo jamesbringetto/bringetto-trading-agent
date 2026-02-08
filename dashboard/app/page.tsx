@@ -56,15 +56,15 @@ export default function Dashboard() {
   const limitsDisabled = portfolio?.trading_limits_disabled ?? false;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 sm:space-y-6">
       {/* Legal Disclaimer */}
       <DisclaimerBanner />
 
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold">Dashboard</h1>
-          <p className="text-muted-foreground">
+          <h1 className="text-xl sm:text-2xl font-bold">Dashboard</h1>
+          <p className="text-sm text-muted-foreground">
             Real-time trading performance overview
           </p>
         </div>
@@ -81,7 +81,7 @@ export default function Dashboard() {
       </div>
 
       {/* Stats Grid */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
         <StatusCard
           title="Account Value"
           value={portfolio ? formatCurrency(portfolio.account_value) : '-'}
@@ -114,54 +114,54 @@ export default function Dashboard() {
 
       {/* Data Reception Status */}
       <section>
-        <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+        <h2 className="text-base sm:text-lg font-semibold mb-3 sm:mb-4 flex items-center gap-2">
           <Database className="h-5 w-5" />
           Data Reception
         </h2>
         {instrumentationStatus?.data_reception ? (
           <DataReceptionCard stats={instrumentationStatus.data_reception} />
         ) : (
-          <div className="rounded-lg border bg-card p-6 text-center text-muted-foreground">
+          <div className="rounded-lg border bg-card p-4 sm:p-6 text-center text-sm text-muted-foreground">
             No data reception stats available
           </div>
         )}
       </section>
 
       {/* Charts Row */}
-      <div className="grid gap-6 lg:grid-cols-2">
+      <div className="grid gap-4 sm:gap-6 lg:grid-cols-2">
         {/* Strategy Performance */}
-        <div className="rounded-lg border bg-card p-6">
+        <div className="rounded-lg border bg-card p-4 sm:p-6">
           <div className="flex items-center gap-2 mb-4">
             <BarChart3 className="h-5 w-5 text-muted-foreground" />
-            <h2 className="text-lg font-semibold">Strategy Performance</h2>
+            <h2 className="text-base sm:text-lg font-semibold">Strategy Performance</h2>
           </div>
           {strategies && strategies.length > 0 ? (
             <StrategyPerformanceChart strategies={strategies} />
           ) : (
-            <div className="h-[300px] flex items-center justify-center text-muted-foreground">
+            <div className="h-[250px] sm:h-[300px] flex items-center justify-center text-muted-foreground">
               No strategy data yet
             </div>
           )}
         </div>
 
         {/* Strategy Stats Table */}
-        <div className="rounded-lg border bg-card p-6">
-          <h2 className="text-lg font-semibold mb-4">Strategy Breakdown</h2>
-          <div className="space-y-3">
+        <div className="rounded-lg border bg-card p-4 sm:p-6">
+          <h2 className="text-base sm:text-lg font-semibold mb-4">Strategy Breakdown</h2>
+          <div className="space-y-2 sm:space-y-3">
             {strategies?.map((strategy) => (
               <div
                 key={strategy.strategy_id}
-                className="flex items-center justify-between p-3 rounded-lg bg-muted/50"
+                className="flex items-center justify-between p-2 sm:p-3 rounded-lg bg-muted/50 gap-2"
               >
-                <div>
-                  <p className="font-medium">{strategy.name}</p>
-                  <p className="text-sm text-muted-foreground">
+                <div className="min-w-0">
+                  <p className="font-medium text-sm sm:text-base truncate">{strategy.name}</p>
+                  <p className="text-xs sm:text-sm text-muted-foreground">
                     {strategy.total_trades} trades | {formatPercent(strategy.win_rate)} win rate
                   </p>
                 </div>
-                <div className="text-right">
+                <div className="text-right shrink-0">
                   <p
-                    className={`font-semibold ${
+                    className={`font-semibold text-sm sm:text-base ${
                       strategy.total_pnl >= 0 ? 'text-green-600' : 'text-red-600'
                     }`}
                   >
@@ -190,7 +190,7 @@ export default function Dashboard() {
 
       {/* Decision Pipeline Funnel */}
       <section>
-        <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+        <h2 className="text-base sm:text-lg font-semibold mb-3 sm:mb-4 flex items-center gap-2">
           <TrendingDown className="h-5 w-5" />
           Decision Pipeline
         </h2>
@@ -201,28 +201,28 @@ export default function Dashboard() {
             totalEvaluations={instrumentationStatus.evaluations.total_evaluations}
           />
         ) : (
-          <div className="rounded-lg border bg-card p-6 text-center text-muted-foreground">
+          <div className="rounded-lg border bg-card p-4 sm:p-6 text-center text-sm text-muted-foreground">
             No funnel data available
           </div>
         )}
       </section>
 
       {/* Recent Trades */}
-      <div className="rounded-lg border bg-card p-6">
-        <h2 className="text-lg font-semibold mb-4">Recent Trades</h2>
+      <div className="rounded-lg border bg-card p-4 sm:p-6">
+        <h2 className="text-base sm:text-lg font-semibold mb-4">Recent Trades</h2>
         <RecentTrades />
       </div>
 
       {/* Strategy Evaluation Summary */}
       <section>
-        <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+        <h2 className="text-base sm:text-lg font-semibold mb-3 sm:mb-4 flex items-center gap-2">
           <BarChart3 className="h-5 w-5" />
           Evaluation Summary
         </h2>
         {instrumentationStatus?.evaluations ? (
           <EvaluationSummaryCard summary={instrumentationStatus.evaluations} />
         ) : (
-          <div className="rounded-lg border bg-card p-6 text-center text-muted-foreground">
+          <div className="rounded-lg border bg-card p-4 sm:p-6 text-center text-sm text-muted-foreground">
             No evaluation data available
           </div>
         )}
@@ -230,14 +230,14 @@ export default function Dashboard() {
 
       {/* Recent Evaluations */}
       <section>
-        <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+        <h2 className="text-base sm:text-lg font-semibold mb-3 sm:mb-4 flex items-center gap-2">
           <Activity className="h-5 w-5" />
           Recent Evaluations
         </h2>
         {evaluations && evaluations.length > 0 ? (
           <EvaluationsList evaluations={evaluations} />
         ) : (
-          <div className="rounded-lg border bg-card p-6 text-center text-muted-foreground">
+          <div className="rounded-lg border bg-card p-4 sm:p-6 text-center text-sm text-muted-foreground">
             No recent evaluations. Evaluations will appear here once the trading loop starts.
           </div>
         )}

@@ -31,7 +31,7 @@ export function RecentTrades() {
 
   return (
     <div className="overflow-x-auto">
-      <table className="w-full">
+      <table className="w-full text-sm min-w-[550px]">
         <thead>
           <tr className="border-b text-left text-sm text-muted-foreground">
             <th className="pb-3 font-medium">Symbol</th>

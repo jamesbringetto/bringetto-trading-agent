@@ -1,8 +1,8 @@
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import { Inter } from 'next/font/google';
 import './globals.css';
 import { Providers } from './providers';
-import { Sidebar } from '@/components/sidebar';
+import { LayoutWrapper } from '@/components/layout-wrapper';
 
 const inter = Inter({ subsets: ['latin'] });
 
@@ -10,6 +10,12 @@ export const metadata: Metadata = {
   title: 'Bringetto Trading Agent',
   description:
     'Educational and experimental algorithmic trading dashboard. Not financial advice.',
+};
+
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 1,
 };
 
 export default function RootLayout({
@@ -21,12 +27,7 @@ export default function RootLayout({
     <html lang="en">
       <body className={inter.className}>
         <Providers>
-          <div className="flex h-screen">
-            <Sidebar />
-            <main className="flex-1 overflow-auto p-6 bg-muted/30">
-              {children}
-            </main>
-          </div>
+          <LayoutWrapper>{children}</LayoutWrapper>
         </Providers>
       </body>
     </html>

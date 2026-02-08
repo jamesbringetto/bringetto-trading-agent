@@ -80,16 +80,16 @@ export default function SettingsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold">Settings</h1>
-          <p className="text-muted-foreground">
+          <h1 className="text-xl sm:text-2xl font-bold">Settings</h1>
+          <p className="text-sm text-muted-foreground">
             Control your trading agent and manage system settings
           </p>
         </div>
         <button
           onClick={handleLogout}
-          className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
+          className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors self-start sm:self-auto"
         >
           <LogOut className="h-4 w-4" />
           Logout
@@ -98,27 +98,25 @@ export default function SettingsPage() {
 
       {/* Trading Limits Toggle */}
       <div
-        className={`flex items-center justify-between rounded-lg border p-4 ${
+        className={`flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between rounded-lg border p-4 ${
           limitsDisabled
             ? 'border-amber-500/50 bg-amber-500/10'
             : 'bg-card'
         }`}
       >
-        <div className="flex items-center gap-3">
-          <div>
-            <p className="font-medium text-sm">
-              Trading Limits (Paper Mode)
-            </p>
-            <p className="text-xs text-muted-foreground">
-              {limitsDisabled
-                ? 'Position and trade count limits are disabled'
-                : 'Max 10 open positions, 30 trades per day'}
-            </p>
-          </div>
+        <div>
+          <p className="font-medium text-sm">
+            Trading Limits (Paper Mode)
+          </p>
+          <p className="text-xs text-muted-foreground">
+            {limitsDisabled
+              ? 'Position and trade count limits are disabled'
+              : 'Max 10 open positions, 30 trades per day'}
+          </p>
         </div>
         <button
           onClick={() => toggleLimitsMutation.mutate(!limitsDisabled)}
-          className="flex items-center gap-2 text-sm cursor-pointer rounded-md px-3 py-2 transition-colors hover:bg-muted/80"
+          className="flex items-center gap-2 text-sm cursor-pointer rounded-md px-3 py-2 transition-colors hover:bg-muted/80 self-start sm:self-auto shrink-0"
         >
           {limitsDisabled ? (
             <>
@@ -135,7 +133,7 @@ export default function SettingsPage() {
       </div>
 
       {/* Trading Status */}
-      <div className="rounded-lg border bg-card p-6">
+      <div className="rounded-lg border bg-card p-4 sm:p-6">
         <h2 className="text-lg font-semibold mb-4">Trading Status</h2>
         <div className="space-y-4">
           <div className="flex items-center justify-between p-4 rounded-lg bg-muted/50">
@@ -169,7 +167,7 @@ export default function SettingsPage() {
       </div>
 
       {/* Trading Controls */}
-      <div className="rounded-lg border bg-card p-6">
+      <div className="rounded-lg border bg-card p-4 sm:p-6">
         <h2 className="text-lg font-semibold mb-4">Trading Controls</h2>
         <div className="grid gap-4 md:grid-cols-3">
           {status?.is_running ? (
@@ -216,7 +214,7 @@ export default function SettingsPage() {
       </div>
 
       {/* Risk Limits */}
-      <div className="rounded-lg border bg-card p-6">
+      <div className="rounded-lg border bg-card p-4 sm:p-6">
         <h2 className="text-lg font-semibold mb-4">Risk Limits (Read-Only)</h2>
         <p className="text-sm text-muted-foreground mb-4">
           These limits are configured in environment variables and cannot be changed from the dashboard.

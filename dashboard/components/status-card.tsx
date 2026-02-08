@@ -19,12 +19,12 @@ export function StatusCard({
   loading,
 }: StatusCardProps) {
   return (
-    <div className="rounded-lg border bg-card p-6">
+    <div className="rounded-lg border bg-card p-4 sm:p-6">
       <div className="flex items-center justify-between">
-        <p className="text-sm font-medium text-muted-foreground">{title}</p>
+        <p className="text-xs sm:text-sm font-medium text-muted-foreground">{title}</p>
         <Icon
           className={cn(
-            'h-5 w-5',
+            'h-4 w-4 sm:h-5 sm:w-5',
             trend === 'up' && 'text-green-500',
             trend === 'down' && 'text-red-500',
             !trend && 'text-muted-foreground'
@@ -33,12 +33,12 @@ export function StatusCard({
       </div>
       <div className="mt-2">
         {loading ? (
-          <div className="h-8 w-24 animate-pulse rounded bg-muted" />
+          <div className="h-7 sm:h-8 w-20 sm:w-24 animate-pulse rounded bg-muted" />
         ) : (
           <>
             <p
               className={cn(
-                'text-2xl font-bold',
+                'text-xl sm:text-2xl font-bold',
                 trend === 'up' && 'text-green-600',
                 trend === 'down' && 'text-red-600'
               )}
@@ -48,7 +48,7 @@ export function StatusCard({
             {subtitle && (
               <p
                 className={cn(
-                  'text-sm',
+                  'text-xs sm:text-sm',
                   trend === 'up' && 'text-green-600',
                   trend === 'down' && 'text-red-600',
                   !trend && 'text-muted-foreground'
