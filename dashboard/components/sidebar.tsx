@@ -7,6 +7,7 @@ import {
   TrendingUp,
   History,
   Settings,
+  X,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { TimezoneSelector } from './timezone-selector';
@@ -17,15 +18,29 @@ const navigation = [
   { name: 'Settings', href: '/settings', icon: Settings },
 ];
 
-export function Sidebar() {
+interface SidebarProps {
+  onNavigate?: () => void;
+}
+
+export function Sidebar({ onNavigate }: SidebarProps) {
   const pathname = usePathname();
 
   return (
     <div className="flex h-full w-64 flex-col bg-card border-r">
       {/* Header */}
-      <div className="flex h-16 items-center border-b px-6">
-        <TrendingUp className="h-6 w-6 text-primary mr-2" />
-        <span className="text-lg font-semibold">Bringetto</span>
+      <div className="flex h-16 items-center border-b px-6 justify-between">
+        <div className="flex items-center">
+          <TrendingUp className="h-6 w-6 text-primary mr-2" />
+          <span className="text-lg font-semibold">Bringetto</span>
+        </div>
+        {/* Close button - mobile only */}
+        <button
+          onClick={onNavigate}
+          className="md:hidden p-1 rounded-md hover:bg-muted transition-colors"
+          aria-label="Close menu"
+        >
+          <X className="h-5 w-5" />
+        </button>
       </div>
 
       {/* Navigation */}
@@ -36,6 +51,7 @@ export function Sidebar() {
             <Link
               key={item.name}
               href={item.href}
+              onClick={onNavigate}
               className={cn(
                 'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
                 isActive
@@ -61,15 +77,15 @@ export function Sidebar() {
           Not financial advice. For educational purposes only.
         </p>
         <div className="flex justify-center gap-3 text-xs text-muted-foreground">
-          <Link href="/terms" className="hover:text-foreground hover:underline">
+          <Link href="/terms" onClick={onNavigate} className="hover:text-foreground hover:underline">
             Terms
           </Link>
           <span>|</span>
-          <Link href="/privacy" className="hover:text-foreground hover:underline">
+          <Link href="/privacy" onClick={onNavigate} className="hover:text-foreground hover:underline">
             Privacy
           </Link>
           <span>|</span>
-          <Link href="/disclaimer" className="hover:text-foreground hover:underline">
+          <Link href="/disclaimer" onClick={onNavigate} className="hover:text-foreground hover:underline">
             Disclaimer
           </Link>
         </div>

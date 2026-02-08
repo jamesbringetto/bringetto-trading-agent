@@ -21,7 +21,7 @@ export default function TradesPage() {
   if (isLoading) {
     return (
       <div className="space-y-4">
-        <h1 className="text-2xl font-bold">Trade History</h1>
+        <h1 className="text-xl sm:text-2xl font-bold">Trade History</h1>
         <div className="animate-pulse space-y-2">
           {[...Array(10)].map((_, i) => (
             <div key={i} className="h-12 bg-muted rounded" />
@@ -35,10 +35,10 @@ export default function TradesPage() {
     <div className="space-y-6">
       <DisclaimerBanner />
 
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold">Trade History</h1>
-          <p className="text-muted-foreground">
+          <h1 className="text-xl sm:text-2xl font-bold">Trade History</h1>
+          <p className="text-sm text-muted-foreground">
             Complete history of all trades executed by the agent
           </p>
         </div>
@@ -57,27 +57,27 @@ export default function TradesPage() {
 
       <div className="rounded-lg border bg-card">
         <div className="overflow-x-auto">
-          <table className="w-full">
+          <table className="w-full text-sm min-w-[700px]">
             <thead>
               <tr className="border-b text-left text-sm text-muted-foreground">
-                <th className="p-4 font-medium">Time</th>
-                <th className="p-4 font-medium">Symbol</th>
-                <th className="p-4 font-medium">Side</th>
-                <th className="p-4 font-medium">Strategy</th>
-                <th className="p-4 font-medium">Qty</th>
-                <th className="p-4 font-medium">Entry</th>
-                <th className="p-4 font-medium">Exit</th>
-                <th className="p-4 font-medium text-right">P&L</th>
-                <th className="p-4 font-medium">Status</th>
+                <th className="p-3 sm:p-4 font-medium">Time</th>
+                <th className="p-3 sm:p-4 font-medium">Symbol</th>
+                <th className="p-3 sm:p-4 font-medium">Side</th>
+                <th className="p-3 sm:p-4 font-medium">Strategy</th>
+                <th className="p-3 sm:p-4 font-medium">Qty</th>
+                <th className="p-3 sm:p-4 font-medium">Entry</th>
+                <th className="p-3 sm:p-4 font-medium">Exit</th>
+                <th className="p-3 sm:p-4 font-medium text-right">P&L</th>
+                <th className="p-3 sm:p-4 font-medium">Status</th>
               </tr>
             </thead>
-            <tbody className="text-sm">
+            <tbody>
               {trades?.map((trade) => (
                 <tr key={trade.id} className="border-b last:border-0 hover:bg-muted/50">
-                  <td className="p-4 text-muted-foreground">
+                  <td className="p-3 sm:p-4 text-muted-foreground whitespace-nowrap">
                     {new Date(trade.entry_time).toLocaleString()}
                   </td>
-                  <td className="p-4">
+                  <td className="p-3 sm:p-4">
                     <div className="flex items-center gap-2">
                       {trade.side === 'buy' ? (
                         <ArrowUpRight className="h-4 w-4 text-green-500" />
@@ -87,7 +87,7 @@ export default function TradesPage() {
                       <span className="font-medium">{trade.symbol}</span>
                     </div>
                   </td>
-                  <td className="p-4">
+                  <td className="p-3 sm:p-4">
                     <span
                       className={`px-2 py-0.5 rounded text-xs font-medium ${
                         trade.side === 'buy'
@@ -98,15 +98,15 @@ export default function TradesPage() {
                       {trade.side.toUpperCase()}
                     </span>
                   </td>
-                  <td className="p-4 text-muted-foreground">
+                  <td className="p-3 sm:p-4 text-muted-foreground">
                     <StrategyTooltip name={trade.strategy_name}>{trade.strategy_name}</StrategyTooltip>
                   </td>
-                  <td className="p-4">{trade.quantity}</td>
-                  <td className="p-4">{formatCurrency(trade.entry_price)}</td>
-                  <td className="p-4">
+                  <td className="p-3 sm:p-4">{trade.quantity}</td>
+                  <td className="p-3 sm:p-4 whitespace-nowrap">{formatCurrency(trade.entry_price)}</td>
+                  <td className="p-3 sm:p-4 whitespace-nowrap">
                     {trade.exit_price ? formatCurrency(trade.exit_price) : '-'}
                   </td>
-                  <td className="p-4 text-right">
+                  <td className="p-3 sm:p-4 text-right whitespace-nowrap">
                     {trade.pnl !== null ? (
                       <div className="flex flex-col items-end">
                         <span
@@ -124,7 +124,7 @@ export default function TradesPage() {
                       '-'
                     )}
                   </td>
-                  <td className="p-4">
+                  <td className="p-3 sm:p-4">
                     <span
                       className={`px-2 py-0.5 rounded text-xs ${
                         trade.status === 'open'

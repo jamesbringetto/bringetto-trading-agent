@@ -35,9 +35,9 @@ function StatBox({
 }) {
   return (
     <div className="text-center">
-      <p className="text-sm text-muted-foreground">{label}</p>
+      <p className="text-xs sm:text-sm text-muted-foreground">{label}</p>
       <p
-        className={`text-2xl font-bold ${
+        className={`text-lg sm:text-2xl font-bold ${
           highlight === 'green'
             ? 'text-green-600'
             : highlight === 'red'
@@ -74,10 +74,10 @@ export function DataReceptionCard({ stats }: { stats: DataReceptionStats }) {
   };
 
   return (
-    <div className="rounded-lg border bg-card p-6">
+    <div className="rounded-lg border bg-card p-4 sm:p-6">
       {/* Status Banner */}
       <div
-        className={`mb-4 rounded-lg p-3 flex items-center gap-2 ${
+        className={`mb-4 rounded-lg p-3 flex items-center gap-2 text-sm sm:text-base ${
           isReceivingData && isFresh
             ? 'bg-green-100 text-green-800'
             : isReceivingData
@@ -157,7 +157,7 @@ export function EvaluationSummaryCard({ summary }: { summary: EvaluationSummary 
   const [expandedStrategy, setExpandedStrategy] = useState<string | null>(null);
 
   return (
-    <div className="rounded-lg border bg-card p-6">
+    <div className="rounded-lg border bg-card p-4 sm:p-6">
       {/* Overall Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
         <StatBox
@@ -198,17 +198,17 @@ export function EvaluationSummaryCard({ summary }: { summary: EvaluationSummary 
                 <div key={name}>
                   <button
                     onClick={() => setExpandedStrategy(isExpanded ? null : name)}
-                    className="w-full flex items-center justify-between rounded-lg bg-muted/50 px-4 py-2 hover:bg-muted/70 transition-colors"
+                    className="w-full flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between rounded-lg bg-muted/50 px-3 sm:px-4 py-2 hover:bg-muted/70 transition-colors text-left"
                   >
                     <div className="flex items-center gap-2">
                       {isExpanded ? (
-                        <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                        <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" />
                       ) : (
-                        <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                        <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
                       )}
-                      <StrategyTooltip name={name} className="font-medium">{name}</StrategyTooltip>
+                      <StrategyTooltip name={name} className="font-medium text-sm sm:text-base">{name}</StrategyTooltip>
                     </div>
-                    <div className="flex items-center gap-4 text-sm">
+                    <div className="flex items-center gap-3 sm:gap-4 text-xs sm:text-sm ml-6 sm:ml-0">
                       <span className="text-muted-foreground">
                         {data.total.toLocaleString()} total
                       </span>
@@ -339,8 +339,8 @@ export function EvaluationsList({ evaluations }: { evaluations: StrategyEvaluati
 
   return (
     <div className="rounded-lg border bg-card overflow-hidden">
-      <div className="max-h-96 overflow-y-auto">
-        <table className="w-full text-sm">
+      <div className="max-h-96 overflow-auto">
+        <table className="w-full text-xs sm:text-sm min-w-[600px]">
           <thead className="bg-muted/50 sticky top-0">
             <tr>
               <th className="text-left px-4 py-2 font-medium">Time</th>
@@ -436,7 +436,7 @@ export function FunnelCard({ funnel, riskBreakdown, totalEvaluations }: FunnelCa
   const rejectedAtOrder = f.orders_failed;
 
   return (
-    <div className="rounded-lg border bg-card p-6">
+    <div className="rounded-lg border bg-card p-4 sm:p-6">
       {/* Funnel Visualization */}
       <div className="space-y-1 mb-6">
         {stages.slice(0, maxStageWithValue + 2).map((stage, idx) => {
@@ -445,21 +445,21 @@ export function FunnelCard({ funnel, riskBreakdown, totalEvaluations }: FunnelCa
           const widthPct = stages[0].value > 0 ? Math.max(5, (stage.value / stages[0].value) * 100) : 5;
 
           return (
-            <div key={stage.label} className="flex items-center gap-3">
-              <div className="w-32 text-sm text-right text-muted-foreground">
+            <div key={stage.label} className="flex items-center gap-2 sm:gap-3">
+              <div className="w-20 sm:w-32 text-xs sm:text-sm text-right text-muted-foreground shrink-0">
                 {stage.label}
               </div>
-              <div className="flex-1 relative">
+              <div className="flex-1 relative min-w-0">
                 <div
-                  className={`h-8 ${stage.color} rounded flex items-center justify-end pr-3 transition-all duration-300`}
+                  className={`h-6 sm:h-8 ${stage.color} rounded flex items-center justify-end pr-2 sm:pr-3 transition-all duration-300`}
                   style={{ width: `${widthPct}%` }}
                 >
-                  <span className="text-white text-sm font-medium">
+                  <span className="text-white text-xs sm:text-sm font-medium">
                     {stage.value.toLocaleString()}
                   </span>
                 </div>
               </div>
-              <div className="w-20 text-xs text-muted-foreground">
+              <div className="w-14 sm:w-20 text-xs text-muted-foreground shrink-0">
                 {idx > 0 && dropoff > 0 && (
                   <span className="text-red-500">-{dropoff.toFixed(1)}%</span>
                 )}
@@ -472,20 +472,20 @@ export function FunnelCard({ funnel, riskBreakdown, totalEvaluations }: FunnelCa
       {/* Outcome Summary */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 pt-4 border-t">
         <div className="text-center">
-          <p className="text-sm text-muted-foreground">Open Positions</p>
-          <p className="text-xl font-bold">{f.orders_filled - f.trades_closed}</p>
+          <p className="text-xs sm:text-sm text-muted-foreground">Open Positions</p>
+          <p className="text-lg sm:text-xl font-bold">{f.orders_filled - f.trades_closed}</p>
         </div>
         <div className="text-center">
-          <p className="text-sm text-muted-foreground">Trades Won</p>
-          <p className="text-xl font-bold text-green-600">{f.trades_won}</p>
+          <p className="text-xs sm:text-sm text-muted-foreground">Trades Won</p>
+          <p className="text-lg sm:text-xl font-bold text-green-600">{f.trades_won}</p>
         </div>
         <div className="text-center">
-          <p className="text-sm text-muted-foreground">Trades Lost</p>
-          <p className="text-xl font-bold text-red-600">{f.trades_lost}</p>
+          <p className="text-xs sm:text-sm text-muted-foreground">Trades Lost</p>
+          <p className="text-lg sm:text-xl font-bold text-red-600">{f.trades_lost}</p>
         </div>
         <div className="text-center">
-          <p className="text-sm text-muted-foreground">Win Rate</p>
-          <p className={`text-xl font-bold ${f.trades_closed > 0 && f.trades_won / f.trades_closed >= 0.5 ? 'text-green-600' : 'text-muted-foreground'}`}>
+          <p className="text-xs sm:text-sm text-muted-foreground">Win Rate</p>
+          <p className={`text-lg sm:text-xl font-bold ${f.trades_closed > 0 && f.trades_won / f.trades_closed >= 0.5 ? 'text-green-600' : 'text-muted-foreground'}`}>
             {f.trades_closed > 0 ? `${(f.trades_won / f.trades_closed * 100).toFixed(1)}%` : '-'}
           </p>
         </div>

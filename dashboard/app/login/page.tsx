@@ -37,8 +37,8 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background">
-      <div className="w-full max-w-md p-8 space-y-6 rounded-lg border bg-card">
+    <div className="min-h-screen flex items-center justify-center bg-background px-4">
+      <div className="w-full max-w-md p-6 sm:p-8 space-y-6 rounded-lg border bg-card">
         <div className="text-center">
           <h1 className="text-2xl font-bold">Trading Dashboard</h1>
           <p className="text-muted-foreground mt-2">Enter password to continue</p>

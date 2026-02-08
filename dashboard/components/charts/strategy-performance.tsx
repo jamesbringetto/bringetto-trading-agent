@@ -28,18 +28,23 @@ export function StrategyPerformanceChart({
   }));
 
   return (
-    <ResponsiveContainer width="100%" height={300}>
-      <BarChart data={data} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+    <ResponsiveContainer width="100%" height={250}>
+      <BarChart data={data} margin={{ top: 10, right: 10, left: 0, bottom: 5 }}>
         <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
         <XAxis
           dataKey="name"
-          tick={{ fontSize: 12 }}
+          tick={{ fontSize: 11 }}
           className="text-muted-foreground"
+          interval={0}
+          angle={-20}
+          textAnchor="end"
+          height={50}
         />
         <YAxis
           tickFormatter={(value) => `$${value}`}
-          tick={{ fontSize: 12 }}
+          tick={{ fontSize: 11 }}
           className="text-muted-foreground"
+          width={50}
         />
         <Tooltip
           content={({ active, payload }) => {
