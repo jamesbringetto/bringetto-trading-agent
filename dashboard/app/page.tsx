@@ -4,9 +4,14 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { formatCurrency, formatPercent } from '@/lib/utils';
 import { StrategyPerformanceChart } from '@/components/charts/strategy-performance';
-import { MarketStatusWidget } from '@/components/market-status';
 import { RecentTrades } from '@/components/recent-trades';
 import { StatusCard } from '@/components/status-card';
+import {
+  DataReceptionCard,
+  FunnelCard,
+  EvaluationSummaryCard,
+  EvaluationsList,
+} from '@/components/instrumentation-widgets';
 import {
   TrendingUp,
   TrendingDown,
@@ -14,7 +19,9 @@ import {
   Activity,
   BarChart3,
   Clock,
+  Database,
 } from 'lucide-react';
+import { useTimezoneStore, TIMEZONE_OPTIONS } from '@/lib/timezone-store';
 
 export default function Dashboard() {
   const { data: portfolio, isLoading: portfolioLoading } = useQuery({
@@ -30,6 +37,18 @@ export default function Dashboard() {
   const { data: status } = useQuery({
     queryKey: ['status'],
     queryFn: () => api.getTradingStatus(),
+  });
+
+  const { data: instrumentationStatus, dataUpdatedAt } = useQuery({
+    queryKey: ['instrumentation-status'],
+    queryFn: () => api.getInstrumentationStatus('session'),
+    refetchInterval: 5000,
+  });
+
+  const { data: evaluations } = useQuery({
+    queryKey: ['evaluations'],
+    queryFn: () => api.getEvaluations(60, undefined, undefined, undefined, 50),
+    refetchInterval: 5000,
   });
 
   const isLoading = portfolioLoading || strategiesLoading;
@@ -89,34 +108,20 @@ export default function Dashboard() {
         />
       </div>
 
-      {/* Market Status */}
-      <div className="grid gap-6 lg:grid-cols-3">
-        <MarketStatusWidget />
-        <div className="lg:col-span-2 rounded-lg border bg-card p-6">
-          <h2 className="text-lg font-semibold mb-4">24/5 Trading Schedule</h2>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-            <div className="p-3 rounded-lg bg-indigo-500/10 border border-indigo-500/20">
-              <p className="text-indigo-500 font-medium">Overnight</p>
-              <p className="text-muted-foreground">8:00 PM - 4:00 AM ET</p>
-            </div>
-            <div className="p-3 rounded-lg bg-orange-500/10 border border-orange-500/20">
-              <p className="text-orange-500 font-medium">Pre-Market</p>
-              <p className="text-muted-foreground">4:00 AM - 9:30 AM ET</p>
-            </div>
-            <div className="p-3 rounded-lg bg-green-500/10 border border-green-500/20">
-              <p className="text-green-500 font-medium">Regular</p>
-              <p className="text-muted-foreground">9:30 AM - 4:00 PM ET</p>
-            </div>
-            <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/20">
-              <p className="text-amber-500 font-medium">After Hours</p>
-              <p className="text-muted-foreground">4:00 PM - 8:00 PM ET</p>
-            </div>
+      {/* Data Reception Status */}
+      <section>
+        <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+          <Database className="h-5 w-5" />
+          Data Reception
+        </h2>
+        {instrumentationStatus?.data_reception ? (
+          <DataReceptionCard stats={instrumentationStatus.data_reception} />
+        ) : (
+          <div className="rounded-lg border bg-card p-6 text-center text-muted-foreground">
+            No data reception stats available
           </div>
-          <p className="mt-4 text-xs text-muted-foreground">
-            Trading available Sunday 8 PM ET through Friday 8 PM ET. Overnight sessions support LIMIT orders only.
-          </p>
-        </div>
-      </div>
+        )}
+      </section>
 
       {/* Charts Row */}
       <div className="grid gap-6 lg:grid-cols-2">
@@ -179,11 +184,82 @@ export default function Dashboard() {
         </div>
       </div>
 
+      {/* Decision Pipeline Funnel */}
+      <section>
+        <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+          <TrendingDown className="h-5 w-5" />
+          Decision Pipeline
+        </h2>
+        {instrumentationStatus?.evaluations?.funnel ? (
+          <FunnelCard
+            funnel={instrumentationStatus.evaluations.funnel}
+            riskBreakdown={instrumentationStatus.evaluations.risk_rejection_breakdown}
+            totalEvaluations={instrumentationStatus.evaluations.total_evaluations}
+          />
+        ) : (
+          <div className="rounded-lg border bg-card p-6 text-center text-muted-foreground">
+            No funnel data available
+          </div>
+        )}
+      </section>
+
       {/* Recent Trades */}
       <div className="rounded-lg border bg-card p-6">
         <h2 className="text-lg font-semibold mb-4">Recent Trades</h2>
         <RecentTrades />
       </div>
+
+      {/* Strategy Evaluation Summary */}
+      <section>
+        <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+          <BarChart3 className="h-5 w-5" />
+          Evaluation Summary
+        </h2>
+        {instrumentationStatus?.evaluations ? (
+          <EvaluationSummaryCard summary={instrumentationStatus.evaluations} />
+        ) : (
+          <div className="rounded-lg border bg-card p-6 text-center text-muted-foreground">
+            No evaluation data available
+          </div>
+        )}
+      </section>
+
+      {/* Recent Evaluations */}
+      <section>
+        <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+          <Activity className="h-5 w-5" />
+          Recent Evaluations
+        </h2>
+        {evaluations && evaluations.length > 0 ? (
+          <EvaluationsList evaluations={evaluations} />
+        ) : (
+          <div className="rounded-lg border bg-card p-6 text-center text-muted-foreground">
+            No recent evaluations. Evaluations will appear here once the trading loop starts.
+          </div>
+        )}
+      </section>
+
+      {/* Last Updated */}
+      {dataUpdatedAt > 0 && <LastUpdatedFooter timestamp={dataUpdatedAt} />}
     </div>
+  );
+}
+
+function LastUpdatedFooter({ timestamp }: { timestamp: number }) {
+  const { timezone } = useTimezoneStore();
+  const tzOption = TIMEZONE_OPTIONS.find((tz) => tz.value === timezone);
+
+  const formattedTime = new Intl.DateTimeFormat('en-US', {
+    timeZone: timezone,
+    hour: 'numeric',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: true,
+  }).format(new Date(timestamp));
+
+  return (
+    <p className="text-xs text-muted-foreground text-right">
+      Last updated: {formattedTime} {tzOption?.abbrev}
+    </p>
   );
 }
