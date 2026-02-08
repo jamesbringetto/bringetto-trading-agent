@@ -17,7 +17,9 @@ WebSocket Streaming:
 """
 
 import asyncio
+import threading
 import time
+from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
@@ -220,6 +222,38 @@ class PDTStatus:
     reason: str
 
 
+class _RestRateLimiter:
+    """Thread-safe sliding-window rate limiter for Alpaca REST API calls.
+
+    IEX (free):  200 requests/minute
+    SIP (paid):  effectively unlimited (10 000 req/min practical cap)
+    """
+
+    def __init__(self, max_requests_per_minute: int):
+        self._max_rpm = max_requests_per_minute
+        self._timestamps: deque[float] = deque()
+        self._lock = threading.Lock()
+
+    def acquire(self) -> None:
+        """Block until a request slot is available."""
+        while True:
+            with self._lock:
+                now = time.monotonic()
+                # Evict timestamps older than 60 seconds
+                while self._timestamps and self._timestamps[0] <= now - 60:
+                    self._timestamps.popleft()
+                if len(self._timestamps) < self._max_rpm:
+                    self._timestamps.append(now)
+                    return
+                # Calculate how long to wait for the oldest request to expire
+                wait = 60.0 - (now - self._timestamps[0]) + 0.05
+            # Sleep outside the lock
+            logger.debug(
+                f"REST rate limiter: {self._max_rpm} req/min cap reached, waiting {wait:.1f}s"
+            )
+            time.sleep(wait)
+
+
 class AlpacaBroker:
     """
     Alpaca broker client for trading operations.
@@ -254,17 +288,26 @@ class AlpacaBroker:
         # Data stream will be initialized when needed
         self._data_stream: StockDataStream | None = None
 
-        logger.info(f"AlpacaBroker initialized - Paper trading: {self._is_paper}")
+        # Global REST rate limiter — feed-tier-aware
+        self._rate_limiter = _RestRateLimiter(settings.effective_rest_rate_limit)
+        feed_tier = "IEX" if settings.use_iex_feed else "SIP"
+        logger.info(
+            f"AlpacaBroker initialized - Paper: {self._is_paper}, "
+            f"Feed: {feed_tier}, REST limit: {settings.effective_rest_rate_limit} req/min"
+        )
 
     def _retry_with_backoff(self, func, *args, **kwargs):
         """
         Execute a function with exponential backoff retry on rate limit errors.
 
+        Acquires a slot from the global rate limiter before each attempt so
+        that the IEX 200-req/min ceiling is never breached system-wide.
         Per Alpaca's terms, we must handle rate limiting gracefully.
         """
         last_exception = None
         for attempt in range(MAX_RETRIES):
             try:
+                self._rate_limiter.acquire()
                 return func(*args, **kwargs)
             except APIError as e:
                 last_exception = e

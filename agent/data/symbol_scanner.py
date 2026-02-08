@@ -28,14 +28,11 @@ from loguru import logger
 
 from agent.config.settings import get_settings
 
-# Rate limit: Basic plan = 200 req/min, Algo Trader Plus = unlimited.
-# We batch bar requests at up to 100 symbols each and add a brief pause to
-# avoid hammering the API regardless of plan.
-BARS_BATCH_SIZE = 100
-# Pause between bar batches.  Even on Algo Trader Plus (unlimited API calls)
-# a small delay avoids overwhelming the network and leaves headroom for
-# concurrent intraday rescans.
-BATCH_DELAY_SECONDS = 0.5
+# Batch sizes and delays are now driven by the feed tier via settings:
+#   IEX (free):  batch=25, delay=2.0s  (200 REST req/min limit)
+#   SIP (paid):  batch=100, delay=0.5s (unlimited REST calls)
+# See Settings.effective_scanner_batch_size / effective_scanner_batch_delay.
+
 # When a batch hits a rate-limit (429) or transient error, retry with backoff.
 MAX_BATCH_RETRIES = 3
 BATCH_RETRY_BASE_DELAY = 5.0  # seconds; doubles each retry (5, 10, 20)
@@ -101,18 +98,23 @@ class SymbolScanner:
         # Cache the latest scan result
         self._last_scan: ScanResult | None = None
 
-        # Configuration from settings
+        # Configuration from settings (feed-tier-aware)
         self._min_price = settings.scanner_min_price
         self._min_avg_volume = settings.scanner_min_avg_volume
         self._lookback_days = settings.scanner_lookback_days
-        self._max_symbols = settings.scanner_max_symbols
+        self._max_symbols = settings.effective_scanner_max_symbols
+        self._batch_size = settings.effective_scanner_batch_size
+        self._batch_delay = settings.effective_scanner_batch_delay
+        self._feed_tier = "IEX" if settings.use_iex_feed else "SIP"
 
         logger.info(
-            f"SymbolScanner initialized - "
+            f"SymbolScanner initialized ({self._feed_tier} tier) - "
             f"min_price=${self._min_price}, "
             f"min_avg_volume={self._min_avg_volume:,}, "
             f"lookback={self._lookback_days}d, "
-            f"max_symbols={self._max_symbols}"
+            f"max_symbols={self._max_symbols}, "
+            f"batch_size={self._batch_size}, "
+            f"batch_delay={self._batch_delay}s"
         )
 
     @property
@@ -203,15 +205,17 @@ class SymbolScanner:
         # because scan() will cap to self._max_symbols anyway.
         early_exit_target = self._max_symbols * EARLY_EXIT_MULTIPLIER
 
-        total_batches = (len(symbols) + BARS_BATCH_SIZE - 1) // BARS_BATCH_SIZE
+        batch_size = self._batch_size
+        total_batches = (len(symbols) + batch_size - 1) // batch_size
         logger.info(
             f"Screening {len(symbols)} symbols in {total_batches} batches "
-            f"(min_price=${min_price}, min_avg_vol={min_avg_volume:,.0f})"
+            f"(batch_size={batch_size}, min_price=${min_price}, "
+            f"min_avg_vol={min_avg_volume:,.0f}, tier={self._feed_tier})"
         )
 
-        for batch_idx in range(0, len(symbols), BARS_BATCH_SIZE):
-            batch = symbols[batch_idx : batch_idx + BARS_BATCH_SIZE]
-            batch_num = batch_idx // BARS_BATCH_SIZE + 1
+        for batch_idx in range(0, len(symbols), batch_size):
+            batch = symbols[batch_idx : batch_idx + batch_size]
+            batch_num = batch_idx // batch_size + 1
 
             # Retry loop for transient / rate-limit errors
             for attempt in range(MAX_BATCH_RETRIES + 1):
@@ -278,7 +282,7 @@ class SymbolScanner:
 
             # Pause between batches to stay under rate limits
             if batch_num < total_batches:
-                time.sleep(BATCH_DELAY_SECONDS)
+                time.sleep(self._batch_delay)
 
             if batch_num % 10 == 0 or batch_num == total_batches:
                 logger.info(
@@ -386,9 +390,10 @@ class SymbolScanner:
 
         logger.info(f"Scanning {len(symbols)} symbols for pre-market gaps >= {min_gap_pct}%")
 
-        # Fetch snapshots in batches
-        for batch_idx in range(0, len(symbols), BARS_BATCH_SIZE):
-            batch = symbols[batch_idx : batch_idx + BARS_BATCH_SIZE]
+        # Fetch snapshots in batches (feed-tier-aware)
+        batch_size = self._batch_size
+        for batch_idx in range(0, len(symbols), batch_size):
+            batch = symbols[batch_idx : batch_idx + batch_size]
 
             for attempt in range(MAX_BATCH_RETRIES + 1):
                 try:
@@ -396,7 +401,11 @@ class SymbolScanner:
                     snapshots = self._data_client.get_stock_snapshot(request)
 
                     for symbol, snapshot in snapshots.items():
-                        if not snapshot or not snapshot.daily_bar or not snapshot.previous_daily_bar:
+                        if (
+                            not snapshot
+                            or not snapshot.daily_bar
+                            or not snapshot.previous_daily_bar
+                        ):
                             continue
 
                         prev_close = float(snapshot.previous_daily_bar.close)
@@ -423,19 +432,27 @@ class SymbolScanner:
                 except APIError as e:
                     if attempt < MAX_BATCH_RETRIES:
                         retry_delay = BATCH_RETRY_BASE_DELAY * (2**attempt)
-                        logger.warning(f"API error during gap scan (attempt {attempt + 1}): {e} — retrying in {retry_delay:.0f}s")
+                        logger.warning(
+                            f"API error during gap scan (attempt {attempt + 1}): {e} — retrying in {retry_delay:.0f}s"
+                        )
                         time.sleep(retry_delay)
                     else:
-                        logger.warning(f"Gap scan batch failed after {MAX_BATCH_RETRIES + 1} attempts: {e}")
+                        logger.warning(
+                            f"Gap scan batch failed after {MAX_BATCH_RETRIES + 1} attempts: {e}"
+                        )
                 except Exception as e:
                     if attempt < MAX_BATCH_RETRIES:
                         retry_delay = BATCH_RETRY_BASE_DELAY * (2**attempt)
-                        logger.error(f"Error during gap scan (attempt {attempt + 1}): {e} — retrying in {retry_delay:.0f}s")
+                        logger.error(
+                            f"Error during gap scan (attempt {attempt + 1}): {e} — retrying in {retry_delay:.0f}s"
+                        )
                         time.sleep(retry_delay)
                     else:
-                        logger.error(f"Gap scan batch failed after {MAX_BATCH_RETRIES + 1} attempts: {e}")
+                        logger.error(
+                            f"Gap scan batch failed after {MAX_BATCH_RETRIES + 1} attempts: {e}"
+                        )
 
-            time.sleep(BATCH_DELAY_SECONDS)
+            time.sleep(self._batch_delay)
 
         # Sort by absolute gap size (largest first)
         gap_candidates.sort(key=lambda x: abs(x["gap_pct"]), reverse=True)
@@ -484,8 +501,9 @@ class SymbolScanner:
             f"Scanning {len(candidates)} symbols for momentum (>={min_return_pct}% in {lookback_days}d)"
         )
 
-        for batch_idx in range(0, len(candidates), BARS_BATCH_SIZE):
-            batch = candidates[batch_idx : batch_idx + BARS_BATCH_SIZE]
+        batch_size = self._batch_size
+        for batch_idx in range(0, len(candidates), batch_size):
+            batch = candidates[batch_idx : batch_idx + batch_size]
 
             for attempt in range(MAX_BATCH_RETRIES + 1):
                 try:
@@ -530,19 +548,27 @@ class SymbolScanner:
                 except APIError as e:
                     if attempt < MAX_BATCH_RETRIES:
                         retry_delay = BATCH_RETRY_BASE_DELAY * (2**attempt)
-                        logger.warning(f"API error during momentum scan (attempt {attempt + 1}): {e} — retrying in {retry_delay:.0f}s")
+                        logger.warning(
+                            f"API error during momentum scan (attempt {attempt + 1}): {e} — retrying in {retry_delay:.0f}s"
+                        )
                         time.sleep(retry_delay)
                     else:
-                        logger.warning(f"Momentum scan batch failed after {MAX_BATCH_RETRIES + 1} attempts: {e}")
+                        logger.warning(
+                            f"Momentum scan batch failed after {MAX_BATCH_RETRIES + 1} attempts: {e}"
+                        )
                 except Exception as e:
                     if attempt < MAX_BATCH_RETRIES:
                         retry_delay = BATCH_RETRY_BASE_DELAY * (2**attempt)
-                        logger.error(f"Error during momentum scan (attempt {attempt + 1}): {e} — retrying in {retry_delay:.0f}s")
+                        logger.error(
+                            f"Error during momentum scan (attempt {attempt + 1}): {e} — retrying in {retry_delay:.0f}s"
+                        )
                         time.sleep(retry_delay)
                     else:
-                        logger.error(f"Momentum scan batch failed after {MAX_BATCH_RETRIES + 1} attempts: {e}")
+                        logger.error(
+                            f"Momentum scan batch failed after {MAX_BATCH_RETRIES + 1} attempts: {e}"
+                        )
 
-            time.sleep(BATCH_DELAY_SECONDS)
+            time.sleep(self._batch_delay)
 
         # Sort by absolute return (strongest momentum first)
         momentum_candidates.sort(key=lambda x: abs(x["return_pct"]), reverse=True)

@@ -217,6 +217,42 @@ class TradingConstants:
     TIER_1_ASSETS: tuple[str, ...] = ("SPY", "QQQ", "IWM")
     TIER_2_ASSETS: tuple[str, ...] = ("AAPL", "MSFT", "NVDA", "TSLA", "GOOGL", "AMZN", "META")
 
+    # IEX (free tier) default symbols — a curated 20-symbol set that fits
+    # within the 30-WebSocket-symbol hard limit while leaving 10 slots for
+    # intraday gap/momentum discoveries.  Covers all 5 strategies:
+    #   ORB:          SPY, QQQ, IWM  (3)
+    #   VWAP:         AAPL, MSFT, NVDA, GOOGL, TSLA  (5)
+    #   Momentum:     AMZN, META, AMD, NFLX, JPM  (5)
+    #   Gap & Go:     (uses dynamic slots from intraday scan)
+    #   EOD Reversal: SPY, QQQ  (shared with ORB — no extra slots)
+    #   General:      BA, UNH  (2 — diversified sector coverage)
+    IEX_DEFAULT_SYMBOLS: tuple[str, ...] = (
+        # Tier 1 ETFs (ORB + EOD)
+        "SPY",
+        "QQQ",
+        "IWM",
+        # Tier 2 mega-caps (VWAP + Momentum)
+        "AAPL",
+        "MSFT",
+        "NVDA",
+        "GOOGL",
+        "TSLA",
+        "AMZN",
+        "META",
+        "AMD",
+        "NFLX",
+        # Financials / Industrials / Healthcare for sector diversification
+        "JPM",
+        "BA",
+        "UNH",
+        # High-volume large-caps for momentum/VWAP
+        "AVGO",
+        "CRM",
+        "V",
+        "HD",
+        "XOM",
+    )
+
     # Full S&P 500 Components + Major ETFs for paper trading experimentation
     # Organized by sector (GICS classification)
     SP500_ASSETS: tuple[str, ...] = (

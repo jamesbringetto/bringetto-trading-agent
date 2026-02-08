@@ -44,12 +44,10 @@ MAX_RECONNECT_ATTEMPTS = 20  # only counts non-connection-limit failures
 INITIAL_RECONNECT_DELAY = 2.0  # seconds
 MAX_RECONNECT_DELAY = 60.0  # seconds
 
-# Per-type subscription caps, based on Alpaca plan limits.
-#   Basic (free):  IEX only, hard WebSocket limit of 30 symbols.
-#   Algo Trader Plus ($99/mo):  SIP feed, unlimited WebSocket symbols.
-# The SIP cap below is a practical client-side cap — Alpaca imposes no limit.
-MAX_SUBSCRIBED_SYMBOLS_IEX = 30  # Alpaca Basic plan hard limit
-MAX_SUBSCRIBED_SYMBOLS_SIP = 2500  # practical cap (Alpaca: unlimited)
+# Subscription caps are now driven by settings.effective_max_websocket_symbols
+# which auto-selects based on feed tier:
+#   IEX (free):  30 symbols (Alpaca Basic plan hard limit)
+#   SIP (paid):  2500 symbols (practical client-side cap; Alpaca unlimited)
 
 
 @dataclass
@@ -120,10 +118,8 @@ class DataStreamer:
         else:
             self._feed = feed
 
-        # Set subscription cap based on feed tier
-        self._max_subscribed = (
-            MAX_SUBSCRIBED_SYMBOLS_SIP if self._feed == DataFeed.SIP else MAX_SUBSCRIBED_SYMBOLS_IEX
-        )
+        # Set subscription cap from settings (feed-tier-aware)
+        self._max_subscribed = settings.effective_max_websocket_symbols
 
         self._stream: StockDataStream | None = None
         self._is_running = False
