@@ -14,9 +14,9 @@ jobs:
       postgres:
         image: postgres:15
         env:
-          POSTGRES_USER: test
-          POSTGRES_PASSWORD: test
-          POSTGRES_DB: test_db
+          POSTGRES_USER: ci_test_user
+          POSTGRES_PASSWORD: ${{ secrets.CI_POSTGRES_PASSWORD || 'ci_ephemeral_password_not_for_production' }}
+          POSTGRES_DB: ci_test_db
         ports:
           - 5432:5432
         options: >-
@@ -51,9 +51,10 @@ jobs:
       - name: Run tests
         env:
           ENVIRONMENT: paper
-          ALPACA_API_KEY: test_key
-          ALPACA_SECRET_KEY: test_secret
-          DATABASE_URL: postgresql://test:test@localhost:5432/test_db
+          ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY || 'ci_test_placeholder' }}
+          ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY || 'ci_test_placeholder' }}
+          DATABASE_URL: postgresql://ci_test_user:${{ secrets.CI_POSTGRES_PASSWORD || 'ci_ephemeral_password_not_for_production' }}@localhost:5432/ci_test_db
+          API_SECRET_KEY: ci_test_api_secret_not_for_production
         run: |
           pytest tests/ -v --cov=agent --cov-report=xml
 
