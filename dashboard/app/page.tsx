@@ -1,8 +1,6 @@
 'use client';
 
-import { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useRouter } from 'next/navigation';
+import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { formatCurrency, formatPercent } from '@/lib/utils';
 import { StrategyPerformanceChart } from '@/components/charts/strategy-performance';
@@ -16,15 +14,9 @@ import {
   Activity,
   BarChart3,
   Clock,
-  LogOut,
-  ToggleLeft,
-  ToggleRight,
 } from 'lucide-react';
 
 export default function Dashboard() {
-  const router = useRouter();
-  const queryClient = useQueryClient();
-
   const { data: portfolio, isLoading: portfolioLoading } = useQuery({
     queryKey: ['portfolio'],
     queryFn: () => api.getPortfolioSummary(),
@@ -40,39 +32,8 @@ export default function Dashboard() {
     queryFn: () => api.getTradingStatus(),
   });
 
-  const [limitsDisabledLocal, setLimitsDisabledLocal] = useState<boolean | null>(null);
-
-  const toggleLimitsMutation = useMutation({
-    mutationFn: (disabled: boolean) => api.toggleTradingLimits(disabled),
-    onMutate: async (disabled: boolean) => {
-      // Cancel outgoing refetches so they don't overwrite our optimistic update
-      await queryClient.cancelQueries({ queryKey: ['portfolio'] });
-      // Optimistically update local state immediately
-      setLimitsDisabledLocal(disabled);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['portfolio'] });
-      queryClient.invalidateQueries({ queryKey: ['status'] });
-    },
-    onError: () => {
-      // Revert optimistic update on failure
-      setLimitsDisabledLocal(null);
-    },
-    onSettled: () => {
-      // Sync local override with server state after refetch completes
-      queryClient.invalidateQueries({ queryKey: ['portfolio'] });
-    },
-  });
-
   const isLoading = portfolioLoading || strategiesLoading;
-  // Use local optimistic state if set, otherwise fall back to server state
-  const limitsDisabled = limitsDisabledLocal ?? portfolio?.trading_limits_disabled ?? false;
-
-  const handleLogout = async () => {
-    await fetch('/api/auth/logout', { method: 'POST' });
-    router.push('/login');
-    router.refresh();
-  };
+  const limitsDisabled = portfolio?.trading_limits_disabled ?? false;
 
   return (
     <div className="space-y-6">
@@ -84,63 +45,16 @@ export default function Dashboard() {
             Real-time trading performance overview
           </p>
         </div>
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2">
-            <div
-              className={`h-3 w-3 rounded-full ${
-                status?.is_running ? 'bg-green-500' : 'bg-red-500'
-              }`}
-            />
-            <span className="text-sm text-muted-foreground">
-              {status?.is_running ? 'Trading Active' : 'Trading Paused'}
-            </span>
-          </div>
-          <button
-            onClick={handleLogout}
-            className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
-          >
-            <LogOut className="h-4 w-4" />
-            Logout
-          </button>
+        <div className="flex items-center gap-2">
+          <div
+            className={`h-3 w-3 rounded-full ${
+              status?.is_running ? 'bg-green-500' : 'bg-red-500'
+            }`}
+          />
+          <span className="text-sm text-muted-foreground">
+            {status?.is_running ? 'Trading Active' : 'Trading Paused'}
+          </span>
         </div>
-      </div>
-
-      {/* Trading Limits Toggle */}
-      <div
-        className={`flex items-center justify-between rounded-lg border p-4 ${
-          limitsDisabled
-            ? 'border-amber-500/50 bg-amber-500/10'
-            : 'bg-card'
-        }`}
-      >
-        <div className="flex items-center gap-3">
-          <div>
-            <p className="font-medium text-sm">
-              Trading Limits (Paper Mode)
-            </p>
-            <p className="text-xs text-muted-foreground">
-              {limitsDisabled
-                ? 'Position and trade count limits are disabled'
-                : 'Max 10 open positions, 30 trades per day'}
-            </p>
-          </div>
-        </div>
-        <button
-          onClick={() => toggleLimitsMutation.mutate(!limitsDisabled)}
-          className="flex items-center gap-2 text-sm cursor-pointer rounded-md px-3 py-2 transition-colors hover:bg-muted/80"
-        >
-          {limitsDisabled ? (
-            <>
-              <span className="text-amber-600 font-medium">Limits Off</span>
-              <ToggleRight className="h-7 w-7 text-amber-500" />
-            </>
-          ) : (
-            <>
-              <span className="text-muted-foreground">Limits On</span>
-              <ToggleLeft className="h-7 w-7 text-muted-foreground" />
-            </>
-          )}
-        </button>
       </div>
 
       {/* Stats Grid */}

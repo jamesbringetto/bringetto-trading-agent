@@ -4,21 +4,15 @@ export function middleware(request: NextRequest) {
   const authCookie = request.cookies.get('dashboard_auth');
   const isAuthenticated = authCookie?.value === 'authenticated';
   const isLoginPage = request.nextUrl.pathname === '/login';
-  const isAuthApi = request.nextUrl.pathname.startsWith('/api/auth');
-  const isPublicPage = ['/terms', '/privacy'].includes(request.nextUrl.pathname);
+  const isSettingsPage = request.nextUrl.pathname === '/settings';
 
-  // Allow auth API routes and public pages (terms, privacy)
-  if (isAuthApi || isPublicPage) {
-    return NextResponse.next();
-  }
-
-  // Redirect authenticated users away from login page
+  // Redirect authenticated users away from login page to settings
   if (isLoginPage && isAuthenticated) {
-    return NextResponse.redirect(new URL('/', request.url));
+    return NextResponse.redirect(new URL('/settings', request.url));
   }
 
-  // Redirect unauthenticated users to login page
-  if (!isLoginPage && !isAuthenticated) {
+  // Only protect the settings page - require authentication
+  if (isSettingsPage && !isAuthenticated) {
     return NextResponse.redirect(new URL('/login', request.url));
   }
 
