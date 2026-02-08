@@ -482,6 +482,20 @@ class DataStreamer:
                     await self._close_stream()
                     conn_mgr.record_disconnected(StreamType.STOCK_DATA)
 
+                    # If SIP feed failed on first attempt, auto-fallback to IEX
+                    # before wasting retries. The SDK swallows "insufficient
+                    # subscription" errors internally, so we detect them via
+                    # quick return.
+                    if self._feed == DataFeed.SIP and self._reconnect_attempts == 0:
+                        logger.warning(
+                            f"SIP feed returned after {run_elapsed:.1f}s with no data. "
+                            f"Auto-falling back to IEX feed. "
+                            f"Set ALPACA_DATA_FEED=iex to avoid this delay."
+                        )
+                        self._feed = DataFeed.IEX
+                        self._reconnect_attempts = 0
+                        continue
+
                     self._reconnect_attempts += 1
                     if self._reconnect_attempts >= MAX_RECONNECT_ATTEMPTS:
                         logger.error(
@@ -530,17 +544,27 @@ class DataStreamer:
                     raise
 
                 # Detect permanent auth/subscription errors — these will
-                # never resolve by retrying.
+                # never resolve by retrying with the same feed.
                 is_subscription_error = "insufficient subscription" in error_msg.lower()
                 if is_subscription_error:
-                    logger.error(
-                        f"Alpaca rejected connection: '{error_msg}'. "
-                        f"Current feed: {self._feed.value}. "
-                        f"If using SIP feed, verify your Alpaca subscription "
-                        f"includes real-time data. For free/paper accounts, "
-                        f"set ALPACA_DATA_FEED=iex."
-                    )
-                    raise
+                    if self._feed == DataFeed.SIP:
+                        logger.warning(
+                            "SIP feed rejected (insufficient subscription). "
+                            "Auto-falling back to IEX feed. "
+                            "Set ALPACA_DATA_FEED=iex to avoid this delay."
+                        )
+                        self._feed = DataFeed.IEX
+                        await self._close_stream()
+                        # Reset reconnect counter since this is a feed change, not a failure
+                        self._reconnect_attempts = 0
+                        continue
+                    else:
+                        logger.error(
+                            f"Alpaca rejected connection: '{error_msg}'. "
+                            f"Current feed: {self._feed.value}. "
+                            f"Verify your Alpaca subscription."
+                        )
+                        raise
 
                 # Detect "connection limit exceeded" or HTTP 429
                 is_connection_limit = "connection limit" in error_msg.lower() or "429" in error_msg
@@ -643,6 +667,17 @@ class DataStreamer:
                         self._stream = None
                     conn_mgr.record_disconnected(StreamType.STOCK_DATA)
 
+                    # If SIP feed failed on first attempt, auto-fallback to IEX
+                    if self._feed == DataFeed.SIP and self._reconnect_attempts == 0:
+                        logger.warning(
+                            f"SIP feed returned after {run_elapsed:.1f}s with no data. "
+                            f"Auto-falling back to IEX feed. "
+                            f"Set ALPACA_DATA_FEED=iex to avoid this delay."
+                        )
+                        self._feed = DataFeed.IEX
+                        self._reconnect_attempts = 0
+                        continue
+
                     self._reconnect_attempts += 1
                     if self._reconnect_attempts >= MAX_RECONNECT_ATTEMPTS:
                         logger.error(
@@ -695,14 +730,26 @@ class DataStreamer:
                 # Detect permanent auth/subscription errors.
                 is_subscription_error = "insufficient subscription" in error_msg.lower()
                 if is_subscription_error:
-                    logger.error(
-                        f"Alpaca rejected connection: '{error_msg}'. "
-                        f"Current feed: {self._feed.value}. "
-                        f"If using SIP feed, verify your Alpaca subscription "
-                        f"includes real-time data. For free/paper accounts, "
-                        f"set ALPACA_DATA_FEED=iex."
-                    )
-                    raise
+                    if self._feed == DataFeed.SIP:
+                        logger.warning(
+                            "SIP feed rejected (insufficient subscription). "
+                            "Auto-falling back to IEX feed. "
+                            "Set ALPACA_DATA_FEED=iex to avoid this delay."
+                        )
+                        self._feed = DataFeed.IEX
+                        if self._stream is not None:
+                            with contextlib.suppress(Exception):
+                                self._stream.stop()
+                            self._stream = None
+                        self._reconnect_attempts = 0
+                        continue
+                    else:
+                        logger.error(
+                            f"Alpaca rejected connection: '{error_msg}'. "
+                            f"Current feed: {self._feed.value}. "
+                            f"Verify your Alpaca subscription."
+                        )
+                        raise
 
                 is_connection_limit = "connection limit" in error_msg.lower() or "429" in error_msg
 

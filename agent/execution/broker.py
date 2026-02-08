@@ -285,6 +285,9 @@ class AlpacaBroker:
             secret_key=self._secret_key,
         )
 
+        # Data feed (IEX or SIP) for REST API requests
+        self._data_feed = DataFeed.IEX if settings.use_iex_feed else DataFeed.SIP
+
         # Data stream will be initialized when needed
         self._data_stream: StockDataStream | None = None
 
@@ -1310,7 +1313,7 @@ class AlpacaBroker:
     def get_latest_quote(self, symbol: str) -> dict[str, Any] | None:
         """Get latest quote for a symbol."""
         try:
-            request = StockLatestQuoteRequest(symbol_or_symbols=symbol)
+            request = StockLatestQuoteRequest(symbol_or_symbols=symbol, feed=self._data_feed)
             quotes = self._data_client.get_stock_latest_quote(request)
             quote = quotes[symbol]
             return {
@@ -1339,6 +1342,7 @@ class AlpacaBroker:
                 timeframe=timeframe,
                 start=start,
                 end=end,
+                feed=self._data_feed,
             )
             bars = self._data_client.get_stock_bars(request)
             return [
@@ -1370,7 +1374,7 @@ class AlpacaBroker:
             Dict with snapshot data, or None if unavailable
         """
         try:
-            request = StockSnapshotRequest(symbol_or_symbols=symbol)
+            request = StockSnapshotRequest(symbol_or_symbols=symbol, feed=self._data_feed)
             snapshots = self._data_client.get_stock_snapshot(request)
             snapshot = snapshots.get(symbol)
             if snapshot is None:
@@ -1432,6 +1436,7 @@ class AlpacaBroker:
                 timeframe=TimeFrame.Day,
                 start=start,
                 end=end,
+                feed=self._data_feed,
             )
             bars = self._data_client.get_stock_bars(request)
             bar_list = list(bars[symbol])
