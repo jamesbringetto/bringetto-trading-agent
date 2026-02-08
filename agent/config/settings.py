@@ -25,8 +25,8 @@ class Settings(BaseSettings):
         description="Alpaca API base URL",
     )
     alpaca_data_feed: Literal["sip", "iex"] = Field(
-        default="sip",
-        description="Market data feed: 'sip' (real-time, paid) or 'iex' (free, limited)",
+        default="iex",
+        description="Market data feed: 'sip' (real-time, paid $99/mo) or 'iex' (free, ~2%% market)",
     )
 
     # Trading Configuration
@@ -97,8 +97,8 @@ class Settings(BaseSettings):
     )
     scanner_max_symbols: int = Field(
         default=1000,
-        ge=10,
-        description="Maximum number of symbols after scanning (SIP cap: 1500, IEX cap: 500)",
+        ge=1,
+        description="Maximum number of symbols after scanning. Ignored on IEX (auto-capped to 25).",
     )
     scanner_rescan_interval_minutes: int = Field(
         default=60,
@@ -116,7 +116,8 @@ class Settings(BaseSettings):
 
     # API Configuration
     api_secret_key: str = Field(
-        ..., description="API secret key for authentication (must be set via API_SECRET_KEY env var)"
+        ...,
+        description="API secret key for authentication (must be set via API_SECRET_KEY env var)",
     )
     api_host: str = Field(default="0.0.0.0")
     api_port: int = Field(default=8000, ge=1, le=65535)
@@ -140,6 +141,75 @@ class Settings(BaseSettings):
     def use_sip_feed(self) -> bool:
         """Check if using SIP (paid real-time) data feed."""
         return self.alpaca_data_feed.lower() == "sip"
+
+    @property
+    def use_iex_feed(self) -> bool:
+        """Check if using IEX (free, limited) data feed."""
+        return not self.use_sip_feed
+
+    # -----------------------------------------------------------------
+    # Feed-tier-aware limits
+    # All IEX constants are in one place so switching to SIP is a single
+    # env-var change (ALPACA_DATA_FEED=sip) with no code edits.
+    # -----------------------------------------------------------------
+
+    # IEX hard caps (Alpaca Basic / free plan)
+    _IEX_MAX_WEBSOCKET_SYMBOLS: int = 30
+    _IEX_MAX_SCANNER_SYMBOLS: int = 25  # leave headroom under 30 WS cap
+    _IEX_REST_RATE_LIMIT_PER_MIN: int = 200
+    _IEX_SCANNER_BATCH_SIZE: int = 25
+    _IEX_SCANNER_BATCH_DELAY: float = 2.0  # seconds between REST batches
+    _IEX_RESCAN_INTERVAL_MINUTES: int = 120  # less frequent to save API calls
+
+    # SIP practical caps (Algo Trader Plus / $99 mo)
+    _SIP_MAX_WEBSOCKET_SYMBOLS: int = 2500
+    _SIP_MAX_SCANNER_SYMBOLS: int = 1000
+    _SIP_REST_RATE_LIMIT_PER_MIN: int = 10000  # effectively unlimited
+    _SIP_SCANNER_BATCH_SIZE: int = 100
+    _SIP_SCANNER_BATCH_DELAY: float = 0.5
+    _SIP_RESCAN_INTERVAL_MINUTES: int = 60
+
+    @property
+    def effective_max_websocket_symbols(self) -> int:
+        """Max symbols for WebSocket subscriptions based on feed tier."""
+        if self.use_sip_feed:
+            return self._SIP_MAX_WEBSOCKET_SYMBOLS
+        return self._IEX_MAX_WEBSOCKET_SYMBOLS
+
+    @property
+    def effective_scanner_max_symbols(self) -> int:
+        """Max symbols the scanner should return based on feed tier."""
+        if self.use_sip_feed:
+            return min(self.scanner_max_symbols, self._SIP_MAX_SCANNER_SYMBOLS)
+        return self._IEX_MAX_SCANNER_SYMBOLS
+
+    @property
+    def effective_rest_rate_limit(self) -> int:
+        """REST API calls per minute based on feed tier."""
+        if self.use_sip_feed:
+            return self._SIP_REST_RATE_LIMIT_PER_MIN
+        return self._IEX_REST_RATE_LIMIT_PER_MIN
+
+    @property
+    def effective_scanner_batch_size(self) -> int:
+        """Number of symbols per scanner REST batch based on feed tier."""
+        if self.use_sip_feed:
+            return self._SIP_SCANNER_BATCH_SIZE
+        return self._IEX_SCANNER_BATCH_SIZE
+
+    @property
+    def effective_scanner_batch_delay(self) -> float:
+        """Delay in seconds between scanner REST batches based on feed tier."""
+        if self.use_sip_feed:
+            return self._SIP_SCANNER_BATCH_DELAY
+        return self._IEX_SCANNER_BATCH_DELAY
+
+    @property
+    def effective_rescan_interval_minutes(self) -> int:
+        """Minutes between intraday rescans based on feed tier."""
+        if self.use_sip_feed:
+            return self.scanner_rescan_interval_minutes
+        return self._IEX_RESCAN_INTERVAL_MINUTES
 
     @property
     def max_daily_loss_amount(self) -> float:

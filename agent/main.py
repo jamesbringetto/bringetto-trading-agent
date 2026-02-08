@@ -1390,13 +1390,25 @@ class TradingAgent:
             self._push_fallback_symbols()
 
     def _push_fallback_symbols(self) -> None:
-        """Push the hardcoded SP500_ASSETS to all strategies as a fallback."""
-        fallback = list(TradingConstants.SP500_ASSETS)
+        """Push fallback symbols to all strategies.
+
+        Feed-tier-aware:
+          IEX (free):  Uses curated IEX_DEFAULT_SYMBOLS (20 symbols) to stay
+                       within the 30 WebSocket symbol hard limit.
+          SIP (paid):  Uses the full SP500_ASSETS list (552 symbols).
+        """
+        if self._settings.use_iex_feed:
+            fallback = list(TradingConstants.IEX_DEFAULT_SYMBOLS)
+            label = "IEX_DEFAULT_SYMBOLS"
+        else:
+            fallback = list(TradingConstants.SP500_ASSETS)
+            label = "SP500_ASSETS"
+
         for strategy in self._strategies:
             if not strategy.parameters.get("allowed_symbols"):
                 strategy.parameters["allowed_symbols"] = fallback
         self._scanned_symbols = fallback
-        logger.info(f"Fallback: {len(fallback)} SP500 symbols pushed to strategies")
+        logger.info(f"Fallback ({label}): {len(fallback)} symbols pushed to strategies")
 
     def _run_intraday_rescan(self) -> None:
         """
@@ -1405,11 +1417,28 @@ class TradingAgent:
         Discovers new symbols that meet gap/momentum criteria and
         dynamically subscribes to their streaming data. Only adds
         new symbols — never removes existing ones mid-session.
+
+        Feed-tier-aware:
+          IEX (free):  Caps total symbols at the WebSocket limit (30).
+                       New discoveries only added if there is remaining capacity.
+          SIP (paid):  No practical cap (2500 WebSocket symbols).
         """
         if not self._settings.enable_symbol_scanner or self._scanner is None:
             return
 
         if self._scanner.last_scan is None:
+            return
+
+        # Compute remaining WebSocket capacity for new symbol additions
+        ws_cap = self._settings.effective_max_websocket_symbols
+        current_total = len(set(self._get_trading_symbols()))
+        remaining_capacity = max(0, ws_cap - current_total)
+
+        if remaining_capacity == 0:
+            logger.info(
+                f"Intraday rescan skipped — WebSocket symbol cap reached ({current_total}/{ws_cap})"
+            )
+            self._last_rescan_time = datetime.now(self._et_tz)
             return
 
         new_symbols: set[str] = set()
@@ -1456,6 +1485,15 @@ class TradingAgent:
         if new_symbols and self._data_streamer:
             existing = set(self._get_trading_symbols())
             truly_new = new_symbols - existing
+
+            # Cap new additions to remaining WebSocket capacity
+            if len(truly_new) > remaining_capacity:
+                truly_new = set(list(truly_new)[:remaining_capacity])
+                logger.info(
+                    f"Capped intraday additions to {remaining_capacity} symbols "
+                    f"(WebSocket limit: {ws_cap})"
+                )
+
             if truly_new:
                 logger.info(f"Intraday rescan found {len(truly_new)} new symbols to subscribe")
                 asyncio.create_task(self._subscribe_new_symbols(list(truly_new)))
@@ -1474,13 +1512,13 @@ class TradingAgent:
             logger.error(f"Failed to subscribe new symbols: {e}")
 
     def _should_rescan(self) -> bool:
-        """Check if it's time for an intraday rescan."""
+        """Check if it's time for an intraday rescan (feed-tier-aware interval)."""
         if not self._settings.enable_symbol_scanner:
             return False
         if self._last_rescan_time is None:
             return True
         elapsed = (datetime.now(self._et_tz) - self._last_rescan_time).total_seconds()
-        return elapsed >= self._settings.scanner_rescan_interval_minutes * 60
+        return elapsed >= self._settings.effective_rescan_interval_minutes * 60
 
     # =========================================================================
     # 24/5 Trading Methods
@@ -2067,12 +2105,19 @@ async def main() -> None:
     logger.info(f"  Overnight Trading (8PM-4AM ET): {settings.enable_overnight_trading}")
     logger.info("  Trading Window: Sunday 8 PM ET - Friday 8 PM ET")
     logger.info("-" * 60)
+    feed_tier = "IEX (free)" if settings.use_iex_feed else "SIP (paid)"
+    logger.info(f"Feed Tier: {feed_tier}")
+    logger.info(f"  WebSocket Symbol Cap: {settings.effective_max_websocket_symbols}")
+    logger.info(f"  REST Rate Limit: {settings.effective_rest_rate_limit} req/min")
+    logger.info("-" * 60)
     logger.info("Symbol Scanner Configuration:")
     logger.info(f"  Enabled: {settings.enable_symbol_scanner}")
     logger.info(f"  Min Price: ${settings.scanner_min_price}")
     logger.info(f"  Min Avg Volume: {settings.scanner_min_avg_volume:,}")
-    logger.info(f"  Max Symbols: {settings.scanner_max_symbols}")
-    logger.info(f"  Rescan Interval: {settings.scanner_rescan_interval_minutes} min")
+    logger.info(f"  Max Symbols (effective): {settings.effective_scanner_max_symbols}")
+    logger.info(f"  Batch Size: {settings.effective_scanner_batch_size}")
+    logger.info(f"  Batch Delay: {settings.effective_scanner_batch_delay}s")
+    logger.info(f"  Rescan Interval: {settings.effective_rescan_interval_minutes} min")
     logger.info("=" * 60)
 
     # Create and run agent
