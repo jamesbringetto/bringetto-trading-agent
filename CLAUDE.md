@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-**Bringetto Trading Agent** is an AI-powered, self-learning algorithmic day trading system designed to operate autonomously 24/7. It executes multiple day trading strategies simultaneously, learns from every trade, and adapts to changing market conditions in real-time.
+**Bringetto Trading Agent** is an automated algorithmic day trading system designed to operate autonomously 24/5. It executes 5 rule-based day trading strategies simultaneously with strict risk management, performance monitoring, and automatic strategy disabling when performance degrades.
 
 ### Key Characteristics
 - **Language**: Python 3.11+
@@ -11,12 +11,27 @@
 - **Deployment**: Railway (backend agent) + Vercel (dashboard)
 - **Database**: PostgreSQL
 
+### What's Implemented
+- 5 concurrent rule-based trading strategies with technical indicators
+- Real-time market data streaming via Alpaca WebSocket
+- Strict risk management (circuit breakers, position limits, stop losses)
+- Performance monitoring with automatic strategy disabling on poor results
+- Full trade logging with decision reasoning
+- REST API and live dashboard for observability
+- Instrumentation pipeline showing data reception and decision flow
+
+### What's Planned (Not Yet Implemented)
+- Machine learning models (market regime detection, pattern recognition, parameter optimization)
+- Post-trade analysis (A/B testing, win/loss attribution, strategy optimization)
+- Background jobs (model retraining, nightly parameter optimization)
+- Adaptive strategy parameters based on trade outcomes
+
 ### Project Goals
 1. Execute 50-100+ trades in first 2 weeks to gather data
 2. Run 5 day trading strategies simultaneously
-3. Learn from every trade (wins AND losses)
-4. Validate strategies before risking real money
-5. Achieve >55% win rate and >1.5 profit factor before going live
+3. Validate strategies before risking real money
+4. Achieve >55% win rate and >1.5 profit factor before going live
+5. Build ML pipeline to learn from trade history (future)
 
 ---
 
@@ -41,11 +56,8 @@ bringetto-trading-agent/
 │   │   ├── gap_and_go.py    # Pre-Market Gap Trading
 │   │   ├── eod_reversal.py  # End-of-Day Reversal
 │   │   └── experimental/    # Sandbox for new strategies
-│   ├── ml/                  # Machine learning models
-│   │   ├── regime.py        # Market regime detection
-│   │   ├── pattern.py       # Pattern recognition
-│   │   ├── optimizer.py     # Parameter optimization
-│   │   └── predictor.py     # Price movement prediction
+│   ├── ml/                  # Machine learning models (PLANNED - not yet implemented)
+│   │   └── __init__.py      # Placeholder for future ML modules
 │   ├── execution/           # Order execution
 │   │   ├── broker.py        # Alpaca integration
 │   │   ├── router.py        # Order routing logic
@@ -66,20 +78,14 @@ bringetto-trading-agent/
 │   │   ├── models.py        # SQLAlchemy models
 │   │   ├── repositories.py  # Data access layer
 │   │   └── migrations/      # Alembic migrations
-│   ├── analysis/            # Post-trade analysis
-│   │   ├── ab_testing.py    # A/B test framework
-│   │   ├── attribution.py   # Win/loss attribution
-│   │   ├── optimization.py  # Strategy optimization
-│   │   └── reports.py       # Weekly/monthly reports
+│   ├── analysis/            # Post-trade analysis (PLANNED - not yet implemented)
+│   │   └── __init__.py      # Placeholder for future analysis modules
 │   ├── api/                 # REST API for dashboard
 │   │   ├── main.py          # FastAPI app
 │   │   ├── routes/          # API endpoints
 │   │   └── websocket.py     # Real-time updates to dashboard
-│   ├── jobs/                # Background tasks
-│   │   ├── daily_report.py  # Daily summary job
-│   │   ├── model_training.py # ML model retraining
-│   │   ├── optimization.py  # Nightly parameter optimization
-│   │   └── cleanup.py       # Database cleanup
+│   ├── jobs/                # Background tasks (PLANNED - not yet implemented)
+│   │   └── __init__.py      # Placeholder for future background jobs
 │   └── main.py              # Agent entry point
 ├── dashboard/               # Web UI (Vercel deployment)
 │   ├── app/                 # Next.js App Router
@@ -199,22 +205,22 @@ npm run type-check
 ## Core Technologies
 
 ### Backend (Python)
-| Package | Purpose |
-|---------|---------|
-| `alpaca-py` | Alpaca trading API SDK |
-| `fastapi` | REST API framework |
-| `uvicorn` | ASGI server |
-| `websockets` | Real-time data streaming |
-| `sqlalchemy` | ORM for PostgreSQL |
-| `alembic` | Database migrations |
-| `pandas` | Data analysis |
-| `numpy` | Numerical computing |
-| `ta` / `ta-lib` | Technical indicators |
-| `scikit-learn` | Machine learning |
-| `apscheduler` | Background job scheduling |
-| `redis` | Caching & pub/sub |
-| `pydantic` | Data validation |
-| `loguru` | Structured logging |
+| Package | Purpose | Status |
+|---------|---------|--------|
+| `alpaca-py` | Alpaca trading API SDK | Active |
+| `fastapi` | REST API framework | Active |
+| `uvicorn` | ASGI server | Active |
+| `websockets` | Real-time data streaming | Active |
+| `sqlalchemy` | ORM for PostgreSQL | Active |
+| `alembic` | Database migrations | Active |
+| `pandas` | Data analysis | Active |
+| `numpy` | Numerical computing | Active |
+| `ta` / `ta-lib` | Technical indicators | Active |
+| `pydantic` | Data validation | Active |
+| `loguru` | Structured logging | Active |
+| `scikit-learn` | Machine learning | Installed, not yet used |
+| `apscheduler` | Background job scheduling | Installed, not yet used |
+| `redis` | Caching & pub/sub | Installed, not yet used |
 
 ### Frontend (TypeScript)
 | Package | Purpose |
@@ -232,7 +238,7 @@ npm run type-check
 
 ## Trading Strategies
 
-The agent runs 5 day trading strategies simultaneously:
+The agent runs 5 rule-based day trading strategies simultaneously. Each strategy uses fixed technical indicator parameters set at initialization. Strategies are automatically disabled after 5 consecutive losses or when win rate drops below 40% (after 20+ trades).
 
 ### 1. Opening Range Breakout (ORB)
 - **Assets**: SPY, QQQ, IWM
@@ -335,17 +341,22 @@ EMAIL_ALERTS_TO=your_email@example.com
 
 Key tables in PostgreSQL:
 
+### Actively Used
 | Table | Purpose |
 |-------|---------|
 | `trades` | Every executed trade with entry/exit details |
 | `trade_decisions` | Complete reasoning for EVERY trade decision |
 | `strategies` | Strategy configurations and parameters |
 | `strategy_performance` | Real-time performance metrics per strategy |
-| `ab_tests` | A/B testing experiments |
-| `market_regimes` | Detected market conditions |
 | `daily_summaries` | Daily performance rollups |
 | `alerts` | System alerts and notifications |
 | `system_health` | Agent health metrics |
+
+### Schema Exists, Not Yet Populated
+| Table | Purpose |
+|-------|---------|
+| `ab_tests` | A/B testing experiments (planned) |
+| `market_regimes` | Detected market conditions (planned) |
 
 ---
 
@@ -434,7 +445,25 @@ Every trade MUST be logged with:
 
 ---
 
-## Success Criteria (Before Real Money)
+## Current Status
+
+### Working
+- [x] 5 rule-based strategies executing trades autonomously
+- [x] Real-time market data streaming (WebSocket)
+- [x] Risk management with circuit breakers and position limits
+- [x] Performance monitoring with automatic strategy disabling
+- [x] Trade decision logging with reasoning
+- [x] REST API and live dashboard
+- [x] Instrumentation pipeline for observability
+
+### Not Yet Implemented
+- [ ] ML models (market regime detection, pattern recognition, price prediction)
+- [ ] Post-trade analysis (A/B testing, win/loss attribution)
+- [ ] Background jobs (model retraining, nightly optimization)
+- [ ] Adaptive strategy parameters
+- [ ] Strategy parameter optimization from historical data
+
+### Success Criteria (Before Real Money)
 
 - [ ] Minimum 3 months profitable paper trading
 - [ ] 50+ trades per strategy (statistical significance)
