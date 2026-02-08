@@ -1,16 +1,52 @@
 'use client';
 
+import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
-import { AlertTriangle, Play, Pause, RefreshCw } from 'lucide-react';
+import {
+  AlertTriangle,
+  Play,
+  Pause,
+  RefreshCw,
+  LogOut,
+  ToggleLeft,
+  ToggleRight,
+} from 'lucide-react';
 
 export default function SettingsPage() {
+  const router = useRouter();
   const queryClient = useQueryClient();
 
   const { data: status } = useQuery({
     queryKey: ['status'],
     queryFn: () => api.getTradingStatus(),
     refetchInterval: 5000,
+  });
+
+  const { data: portfolio } = useQuery({
+    queryKey: ['portfolio'],
+    queryFn: () => api.getPortfolioSummary(),
+  });
+
+  const [limitsDisabledLocal, setLimitsDisabledLocal] = useState<boolean | null>(null);
+
+  const toggleLimitsMutation = useMutation({
+    mutationFn: (disabled: boolean) => api.toggleTradingLimits(disabled),
+    onMutate: async (disabled: boolean) => {
+      await queryClient.cancelQueries({ queryKey: ['portfolio'] });
+      setLimitsDisabledLocal(disabled);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['portfolio'] });
+      queryClient.invalidateQueries({ queryKey: ['status'] });
+    },
+    onError: () => {
+      setLimitsDisabledLocal(null);
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['portfolio'] });
+    },
   });
 
   const killMutation = useMutation({
@@ -34,13 +70,68 @@ export default function SettingsPage() {
     },
   });
 
+  const limitsDisabled = limitsDisabledLocal ?? portfolio?.trading_limits_disabled ?? false;
+
+  const handleLogout = async () => {
+    await fetch('/api/auth/logout', { method: 'POST' });
+    router.push('/');
+    router.refresh();
+  };
+
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Settings</h1>
-        <p className="text-muted-foreground">
-          Control your trading agent and manage system settings
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold">Settings</h1>
+          <p className="text-muted-foreground">
+            Control your trading agent and manage system settings
+          </p>
+        </div>
+        <button
+          onClick={handleLogout}
+          className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
+        >
+          <LogOut className="h-4 w-4" />
+          Logout
+        </button>
+      </div>
+
+      {/* Trading Limits Toggle */}
+      <div
+        className={`flex items-center justify-between rounded-lg border p-4 ${
+          limitsDisabled
+            ? 'border-amber-500/50 bg-amber-500/10'
+            : 'bg-card'
+        }`}
+      >
+        <div className="flex items-center gap-3">
+          <div>
+            <p className="font-medium text-sm">
+              Trading Limits (Paper Mode)
+            </p>
+            <p className="text-xs text-muted-foreground">
+              {limitsDisabled
+                ? 'Position and trade count limits are disabled'
+                : 'Max 10 open positions, 30 trades per day'}
+            </p>
+          </div>
+        </div>
+        <button
+          onClick={() => toggleLimitsMutation.mutate(!limitsDisabled)}
+          className="flex items-center gap-2 text-sm cursor-pointer rounded-md px-3 py-2 transition-colors hover:bg-muted/80"
+        >
+          {limitsDisabled ? (
+            <>
+              <span className="text-amber-600 font-medium">Limits Off</span>
+              <ToggleRight className="h-7 w-7 text-amber-500" />
+            </>
+          ) : (
+            <>
+              <span className="text-muted-foreground">Limits On</span>
+              <ToggleLeft className="h-7 w-7 text-muted-foreground" />
+            </>
+          )}
+        </button>
       </div>
 
       {/* Trading Status */}
